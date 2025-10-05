@@ -9,6 +9,7 @@ DOMAIN = "somfy_cul"
 # Config flow
 CONF_CUL_PATH: Final = "cul_path"  # /dev/ttyAMA0
 CONF_BAUD_RATE: Final = "baud_rate"  # 38400
+CONF_DEBUG_RX = "debug_rx"
 
 CONF_NAME: Final = "name"
 CONF_TYPE: Final = "shutter"
@@ -22,6 +23,7 @@ ATTR_DOWN_TIME: Final = "down_time"
 ATTR_CURRENT_POS: Final = "current_pos"
 
 DATA_SOMFY_CUL = "somfy_cul_data"
+DATA_RX_BUFFER = "rx_buffer"
 
 MANUFACTURER = "Somfy"
 
@@ -30,3 +32,5 @@ SERVICE_OPEN = "open_cover"
 SERVICE_CLOSE = "close_cover"
 SERVICE_STOP = "stop_cover"
 SERVICE_RELOAD = "reload_state"
+
+SIGNAL_SOMFY_CUL_FRAME = "somfy_cul_frame"

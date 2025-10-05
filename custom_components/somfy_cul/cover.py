@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import os
-from threading import Timer
+import re
 import time
 from typing import Any, Final
 
@@ -25,6 +25,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+from homeassistant.helpers.event import async_call_later
 
 from .const import (
     ATTR_CURRENT_POS,
@@ -75,8 +76,8 @@ PLATFORM_SCHEMA = COVER_PLATFORM_SCHEMA.extend(
     {
         vol.Required(CONF_NAME): cv.string,
         vol.Required(CONF_ADDRESS): cv.string,
-        vol.Optional(CONF_TYPE, default=CoverDeviceClass.SHADE): cv.string,
-        vol.Optional(CONF_REVERSED, default=False): int,
+        vol.Optional(CONF_TYPE, default=CoverDeviceClass.SHUTTER): cv.string,
+        vol.Optional(CONF_REVERSED, default=False): cv.boolean,
         vol.Optional(ATTR_UP_TIME): vol.Coerce(int),
         vol.Optional(ATTR_DOWN_TIME): vol.Coerce(int),
     }
@@ -171,8 +172,8 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         self._up_time = up_time
         self._down_time = down_time
 
-        self._drv_timer = None
-        self._stop_timer = None
+        self._cancel_drv_timer = None
+        self._cancel_stop_timer = None
         self._cmd_time = 0
 
         self._attr_unique_id = address
@@ -218,22 +219,41 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
 
     def send_command(self, cmd: Command, target_pos=None):
         """Send a command to the CUL."""
+
+        cmd, time_to_stop = self._update_state(cmd, target_pos)
+        if cmd is None:
+            return
+
+        frame = self._command_string(cmd)
+
         try:
-            cmd, time_to_stop = self._update_state(cmd, target_pos)
-            self._somfy_cul.send_command(self._command_string(cmd))
-            if time_to_stop is not None:
-                self._stop_timer = Timer(time_to_stop, self._send_stop_command)
-                self._stop_timer.start()
-        finally:
-            self._increase_rolling_code()
-            self._async_save_state()
+            self._somfy_cul.send_command(frame)
+        except Exception as e:
+            _LOGGER.exception("Failed to send Somfy frame: %s", e)
+            return
+
+        self._increase_rolling_code()
+
+        if getattr(self, "_cancel_stop_timer", None):
+            try:
+                self._cancel_stop_timer()
+            finally:
+                self._cancel_stop_timer = None
+
+        if time_to_stop and time_to_stop > 0:
+            async def _cb(_now):
+                # optional: prüfen, ob inzwischen ein anderer Move läuft
+                self._send_stop_command()
+
+            # async_call_later gibt ein Cancel-Callable zurück -> merken!
+            self._cancel_stop_timer = async_call_later(self.hass, time_to_stop, _cb)
+
 
     def _send_stop_command(self):
         try:
             self._somfy_cul.send_command(self._command_string(Command.STOP))
         finally:
             self._increase_rolling_code()
-            self._async_save_state()
 
     async def async_prog_cover(self):
         """Handle the async_prog_cover service."""
@@ -241,7 +261,6 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
             self._somfy_cul.send_command(self._command_string(Command.PROG))
         finally:
             self._increase_rolling_code()
-            self._async_save_state()
 
     async def async_added_to_hass(self) -> None:
         """Complete the initialization."""
@@ -378,10 +397,12 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
 
     def _reset_timer(self):
         """Reset timer functions."""
-        if self._drv_timer is not None:
+        if getattr(self, "_cancel_drv_timer", None):
             _LOGGER.debug("Resetting timer")
-            self._drv_timer.cancel()
-            self._drv_timer = None
+            try:
+                self._cancel_drv_timer()
+            finally:
+                self._cancel_drv_timer = None
 
     def _write_state(self, cmd: Command, position=None):
         if cmd == Command.OPEN:
@@ -469,9 +490,11 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
                 _LOGGER.error("Position cannot be set")
                 return None, None
 
-            self._drv_timer = Timer(
-                time_to_stop, self._write_state_pos, args=(target_position,)
-            )
+            async def _handle_timer(_now):
+                self._write_state_pos(target_position)
+            self._cancel_drv_timer = async_call_later(self.hass, time_to_stop, _handle_timer)
+            # self._cancel_drv_timer = Timer( time_to_stop, self._write_state_pos, args=(target_position,) )
+
             _LOGGER.debug("POS timer with timeout: %s", time_to_stop)
 
         elif cmd == Command.OPEN:
@@ -483,7 +506,11 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
             if self._attr_current_cover_position is not None:
                 cur = self._attr_current_cover_position / 100
                 timeout = timeout * (1 - cur) + 1
-            self._drv_timer = Timer(timeout, self._write_state_open)
+
+            async def _cb(_now):
+                self._write_state_open()
+            self._cancel_drv_timer = async_call_later(self.hass, timeout, _cb)
+            # self._cancel_drv_timer = Timer(timeout, self._write_state_open)
             _LOGGER.debug("OPEN timer with timeout: %s", timeout)
 
         elif cmd == Command.CLOSE:
@@ -495,7 +522,11 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
             if self._attr_current_cover_position is not None:
                 cur = self._attr_current_cover_position / 100
                 timeout = timeout * (cur) + 1
-            self._drv_timer = Timer(timeout, self._write_state_closed)
+
+            async def _cb(_now):
+                self._write_state_closed()
+            self._cancel_drv_timer = async_call_later(self.hass, timeout, _cb)
+            # self._cancel_drv_timer = Timer(timeout, self._write_state_closed)
             _LOGGER.debug("CLOSE timer with timeout: %s", timeout)
 
         else:
@@ -505,7 +536,7 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
             )
             return None, None
 
-        self._drv_timer.start()
+        self._cancel_drv_timer.start()
 
         return cmd, time_to_stop
 
@@ -533,7 +564,13 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
             if _move_time and _move_time > 0:
                 cmd, time_to_stop = self._start_update_state_timer(cmd, target_position)
             else:
-                self._write_state(cmd)
+                if cmd == Command.POS:
+                    if target_position is None or _move_time is None:
+                        _LOGGER.error("Position cannot be set: missing target. Did you set up up_time and down_time?")
+                        return None, None
+                    self._write_state(cmd, position=target_position)
+                else:
+                    self._write_state(cmd)
 
         elif cmd == Command.STOP:
             current_pos = (
@@ -543,14 +580,14 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
             )
             current_time = time.time()
 
-            if self._drv_timer is not None and (
+            if self._cancel_drv_timer is not None and (
                 self._attr_is_closing or self._attr_is_opening
             ):
                 self._reset_timer()
                 if self._cmd_time > 0:
                     ti = current_time - self._cmd_time
                     dt = self._up_time if self._attr_is_opening else self._down_time
-                    current_pos += int(ti / dt * 100) * (
+                    current_pos += round(ti / dt * 100) * (
                         1 if self._attr_is_opening else -1
                     )
 
@@ -564,19 +601,53 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         return cmd, time_to_stop
 
     def _calculate_checksum(self, command_string: str):
-        """Calculate checksum for command string.
-
-        From https://pushstack.wordpress.com/somfy-rts-protocol/ :
-        The checksum is calculated by doing a XOR of all nibbles of the frame.
-        To generate a checksum for a frame set the 'cks' field to 0 before
-        calculating the checksum.
-        """
         cmd = bytearray(command_string, "utf-8")
         checksum = 0
         for char in cmd:
             checksum = checksum ^ char ^ (char >> 4)
         checksum = checksum & 0xF
         return f"{checksum:01X}"
+
+    def _calculate_checksum(self, frame_hex: str) -> str:
+        """Calculate checksum for command string.
+
+        From https://pushstack.wordpress.com/somfy-rts-protocol/ :
+
+        Somfy-Checksumme über die 7 Frame-Bytes (14 Hex-Nibbles) berechnen.
+        Erwartet eine 14-stellige Hex-Zeichenkette ohne 'Ys' und ohne '\n'.
+        Vor der Berechnung wird das cks-Nibble (Index 3) auf '0' gesetzt.
+        """
+        if not isinstance(frame_hex, str):
+            _LOGGER.error("Checksum: frame must be str, got %r", type(frame_hex))
+            raise ValueError("frame_hex must be str")
+
+        frame_hex = frame_hex.upper()
+        if not re.fullmatch(r"[0-9A-F]{14}", frame_hex or ""):
+            _LOGGER.error("Checksum: invalid frame '%s' (need 14 hex nibbles)", frame_hex)
+            raise ValueError(f"Somfy frame must be 14 hex digits, got: {frame_hex!r}")
+
+        # cks-Nibble to 0 for calculation
+        frame0 = frame_hex[:3] + "0" + frame_hex[4:]
+
+        cks = 0
+
+        debug = _LOGGER.isEnabledFor(logging.DEBUG)
+        if debug:
+            bytes_list = []
+
+        for i in range(0, 14, 2):
+            b = int(frame0[i:i+2], 16)     # 2 Hex chars -> 1 Byte
+            if debug:
+                bytes_list.append(b)
+            cks ^= (b ^ (b >> 4))
+
+        cks &= 0xF
+        if debug:
+            _LOGGER.debug(
+                "Checksum calc: frame0=%s bytes=%s -> cks=%X",
+                frame0, " ".join(f"{b:02X}" for b in bytes_list), cks
+            )
+        return f"{cks:X}"
 
     def _command_string(self, cmd: Command):
         """Generate command string.
@@ -589,19 +660,44 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         RRRR - Rolling code
         SSSSSS - Address (= remote channel)
         """
-        command_string = (
-            f"A{self._enc_key:01X}{cmd.value}{self._rolling_code:04X}{self._address}"
-        )
 
-        chksum = self._calculate_checksum(command_string)
+        addr = str(self._address).upper()
+        if not re.fullmatch(r"[0-9A-F]{1,6}", addr or ""):
+            raise ValueError(f"invalid Somfy address: {self._address!r}")
+        address = addr.zfill(6)
 
-        command_string = command_string[:3] + chksum + command_string[4:]
+        enc = f"{(int(self._enc_key) & 0xF):X}"
+        cval = f"{(int(cmd.value) & 0xF):X}"
+        roll = f"{(int(self._rolling_code) & 0xFFFF):04X}"
+
+        raw = f"A{enc}{cval}0{roll}{address}"
+        if len(raw) != 14:
+            _LOGGER.error("Command build: invalid raw length %d (raw=%s)", len(raw), raw)
+            raise ValueError("raw Somfy frame must be 14 hex nibbles")
+
+        chksum = self._calculate_checksum(raw)
+        frame  = raw[:3] + chksum + raw[4:]
+
         _LOGGER.debug(
             "Generated string %s from command %s for device %s",
-            command_string,
+            frame,
             cmd.value,
             self.name,
         )
+
+        # Verification: XOR of all Nibbles (over 7 Bytes) must be 0
+        test = 0
+        for i in range(0, 14, 2):
+            b = int(frame[i:i+2], 16)
+            test ^= (b ^ (b >> 4))
+        if (test & 0xF) != 0:
+            _LOGGER.warning(
+                "Checksum verify failed: frame=%s residual=%X (raw=%s, cks=%s)",
+                frame, test & 0xF, raw, chksum
+            )
+        else:
+            _LOGGER.debug("Checksum OK for frame=%s", frame)
+
         _LOGGER.debug(
             "ENC Key: %s, CMD: %s, CHKSUM: %s, Rolling Code: %s, Address: %s",
             self._enc_key,
@@ -610,5 +706,7 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
             self._rolling_code,
             self._address,
         )
-        command_string = "Ys" + command_string + "\n"
-        return command_string.encode()
+
+        wire = ("Ys" + frame + "\n").encode("ascii", "strict")
+        _LOGGER.debug("Wire command: %r", wire)
+        return wire

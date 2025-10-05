@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import logging
-import os
-from typing import Any
 
-import serial
+from collections import deque
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
@@ -14,9 +12,12 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+from homeassistant.helpers.dispatcher import dispatcher_send
 
-from .const import CONF_BAUD_RATE, CONF_CUL_PATH, DATA_SOMFY_CUL, DOMAIN
+from .const import CONF_BAUD_RATE, CONF_CUL_PATH, DATA_SOMFY_CUL, DOMAIN, SIGNAL_SOMFY_CUL_FRAME, CONF_DEBUG_RX, DATA_RX_BUFFER
 from .cul import Cul
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,69 +34,63 @@ CONFIG_SCHEMA = vol.Schema(
 )
 
 
-async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
-    """Validate the user input allows us to connect.
-
-    Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
-    """
-
-    return True, None
-
-    if os.path.exists(data[CONF_CUL_PATH]):
-        if os.access(data[CONF_CUL_PATH], os.R_OK | os.W_OK):
-            # Return info that you want to store in the config entry.
-
-            try:
-                with serial.Serial(
-                    data[CONF_CUL_PATH], data[CONF_BAUD_RATE], timeout=1
-                ) as ser:
-                    return True, None
-            except serial.SerialException as e:
-                return False, f"Failed to open {data[CONF_CUL_PATH]}: {e}"
-
-        else:
-            return (
-                False,
-                f"Device {data[CONF_CUL_PATH]} exists but does not have read/write permissions.",
-            )
-    else:
-        return False, f"Device {data[CONF_CUL_PATH]} does not exist."
-
-
-def setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Set up the SOMFY CUL component."""
-
-    conf = config.get(DOMAIN, None)
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    conf = config.get(DOMAIN)
     if not conf:
         _LOGGER.error(
-            "SOMFY CUL configuration is missing. Please add a somfy_cul section to your configuration.yaml"
+            "SOMFY CUL configuration is missing. "
+            "Add a '%s:' section to your configuration.yaml.", DOMAIN
         )
         return False
 
-    cul_path = conf[CONF_CUL_PATH]
+    cul_path = conf.get(CONF_CUL_PATH)
+    if not cul_path:
+        _LOGGER.error("Missing required option '%s' in %s config.", CONF_CUL_PATH, DOMAIN)
+        return False
+
     baud_rate = int(conf.get(CONF_BAUD_RATE, 38400))
+    debug_rx: bool = bool(conf.get(CONF_DEBUG_RX, False))
     cul = None
 
-    # Create API instance
     try:
         cul = Cul(cul_path, baud_rate)
     except ValueError as e:
-        _LOGGER.error("Could not connect to CUL")
+        _LOGGER.error("Could not connect to CUL at %s: %s", cul_path, e)
+        return False
 
-    # Validate the API connection (and authentication)
-    # version = cul.get_cul_version()
-    # if not isinstance(version, str) or len(version) < 1:
-    #     _LOGGER.error("Could not read CUL version")
-    #     return False
+    version = cul.get_cul_version()
+    if not version:
+        _LOGGER.error("Could not read CUL version at %s", cul_path)
+        cul.close()
+        return False
 
-    # _LOGGER.info("CUL version %s", version)
+    _LOGGER.info("SOMFY CUL connected (%s) at %s, baud %d", version, cul_path, baud_rate)
 
-    # Store an API object for your platforms to access
+    async def _on_ha_stop(_event) -> None:
+        try:
+            cul.close()
+            _LOGGER.info("SOMFY CUL at %s closed on shutdown.", cul_path)
+        except Exception as e:
+            _LOGGER.debug("Error while closing CUL at shutdown: %s", e)
 
-    hass.data[DOMAIN] = {DATA_SOMFY_CUL: cul}
+    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _on_ha_stop)
+
+    rx_buffer = deque(maxlen=200)  # <—
+    hass.data.setdefault(DOMAIN, {})[DATA_RX_BUFFER] = rx_buffer
+    hass.data[DOMAIN][DATA_SOMFY_CUL] = cul
+
+    def _on_rx(line: str) -> None:
+        rx_buffer.append(line)
+
+        if debug_rx and _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug("SOMFY CUL RX: %s", line)
+
+        # entities could subscribe on this:
+        dispatcher_send(hass, SIGNAL_SOMFY_CUL_FRAME, line)
+
+    cul.start_listen(_on_rx)
 
     return True
-
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""

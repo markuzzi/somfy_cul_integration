@@ -6,10 +6,10 @@
   ],
   "dependencies": [],
   "documentation": "https://github.com/markuzzi/somfy_cul_integration",
-  "homekit": {},
   "integration_type": "hub",
   "iot_class": "assumed_state",
   "issue_tracker": "https://github.com/markuzzi/somfy_cul_integration/issues",
+  "loggers": ["somfy_cul"],
   "requirements": [
     "pyserial==3.5"
   ],

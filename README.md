@@ -41,6 +41,19 @@ cover:
 
 Once created, the integration will create a file name `somfy_cover_state.yaml` in your `config` directory. In this file you can manipulate the `enc_keys` and the `rolling_codes` of the covers.
 
+## Services
+
+The integration registers several services to directly control or manage your SOMFY RTS covers.
+
+| Service | Description | Example |
+|---------|-------------|---------|
+| `somfy_cul.prog_cover` | Put a cover into **programming mode** (needed to pair or re-pair a remote/cover). | ```yaml\nservice: somfy_cul.prog_cover\ndata:\n  entity_id: cover.somfy_cul_abcd\n``` |
+| `somfy_cul.open_cover` | Open the specified cover. | ```yaml\nservice: somfy_cul.open_cover\ndata:\n  entity_id: cover.somfy_cul_abcd\n``` |
+| `somfy_cul.close_cover` | Close the specified cover. | ```yaml\nservice: somfy_cul.close_cover\ndata:\n  entity_id: cover.somfy_cul_abcd\n``` |
+| `somfy_cul.stop_cover` | Stop the cover’s movement immediately. | ```yaml\nservice: somfy_cul.stop_cover\ndata:\n  entity_id: cover.somfy_cul_abcd\n``` |
+| `somfy_cul.reload_state` | Reload the `somfy_cover_state.yaml` file from disk. Useful if you manually edited encryption keys or rolling codes. | ```yaml\nservice: somfy_cul.reload_state\ndata:\n  entity_id: cover.somfy_cul_abcd\n``` |
+
+All services require at least the `entity_id` of the target cover.
 
 # Contributing To The Project
 
