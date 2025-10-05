@@ -143,3 +143,14 @@ class Cul:
 
     def send_line(self, line: str) -> bool:
         return self.send_command((line + "\n").encode("ascii"))
+
+    def reload_connection(self) -> bool:
+        """Close and reopen the serial connection."""
+        if self._test:
+            return True
+
+        self.close()
+        self._stop.clear()
+        self._open_serial()
+
+        return self.is_open()

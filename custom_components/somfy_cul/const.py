@@ -24,6 +24,7 @@ ATTR_CURRENT_POS: Final = "current_pos"
 
 DATA_SOMFY_CUL = "somfy_cul_data"
 DATA_RX_BUFFER = "rx_buffer"
+DATA_RX_CALLBACK = "rx_callback"
 
 MANUFACTURER = "Somfy"
 
@@ -32,5 +33,7 @@ SERVICE_OPEN = "open_cover"
 SERVICE_CLOSE = "close_cover"
 SERVICE_STOP = "stop_cover"
 SERVICE_RELOAD = "reload_state"
+SERVICE_RELOAD_PLATFORM = "reload_platform"
+SERVICE_SEND_RAW_COMMAND = "send_raw_command"
 
 SIGNAL_SOMFY_CUL_FRAME = "somfy_cul_frame"

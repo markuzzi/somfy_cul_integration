@@ -226,6 +226,10 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
 
         frame = self._command_string(cmd)
 
+        if not self._somfy_cul:
+            _LOGGER.error("CUL handle missing; command %s dropped", cmd)
+            return
+
         try:
             self._somfy_cul.send_command(frame)
         except Exception as e:
@@ -535,8 +539,6 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
                 cmd,
             )
             return None, None
-
-        self._cancel_drv_timer.start()
 
         return cmd, time_to_stop
 

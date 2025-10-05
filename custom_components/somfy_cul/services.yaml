@@ -38,3 +38,19 @@ reload_state:
       name: "Entity ID"
       description: "The entity ID of the cover"
       example: cover.somfy_cul_abcd
+reload_platform:
+  name: "Reload SOMFY Platform"
+  description: "Reconnect to the SOMFY CUL stick and restart the listener thread"
+send_raw_command:
+  name: "Send Raw Command"
+  description: "Send a raw SOMFY CUL command and log the immediate response, if any"
+  fields:
+    command:
+      name: "Command"
+      description: "Raw command to send, without trailing newline"
+      example: "V"
+    timeout:
+      name: "Timeout"
+      description: "Seconds to wait for a response before continuing"
+      example: 2
+
