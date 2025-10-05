@@ -95,10 +95,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
     hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _on_ha_stop)
 
-    rx_buffer = deque(maxlen=200)  # <—
+    rx_buffer = deque(maxlen=200)
     hass.data.setdefault(DOMAIN, {})[DATA_RX_BUFFER] = rx_buffer
-    hass.data[DOMAIN][DATA_RX_CALLBACK] = _on_rx
-    hass.data[DOMAIN][DATA_SOMFY_CUL] = cul
 
     def _on_rx(line: str) -> None:
         rx_buffer.append(line)
@@ -110,6 +108,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         dispatcher_send(hass, SIGNAL_SOMFY_CUL_FRAME, line)
 
     cul.start_listen(_on_rx)
+
+    hass.data[DOMAIN][DATA_RX_CALLBACK] = _on_rx
+    hass.data[DOMAIN][DATA_SOMFY_CUL] = cul
 
     async def async_reload_platform_service(_call) -> None:
         somfy_cul = hass.data.get(DOMAIN, {}).get(DATA_SOMFY_CUL)

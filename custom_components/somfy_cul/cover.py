@@ -602,13 +602,6 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
 
         return cmd, time_to_stop
 
-    def _calculate_checksum(self, command_string: str):
-        cmd = bytearray(command_string, "utf-8")
-        checksum = 0
-        for char in cmd:
-            checksum = checksum ^ char ^ (char >> 4)
-        checksum = checksum & 0xF
-        return f"{checksum:01X}"
 
     def _calculate_checksum(self, frame_hex: str) -> str:
         """Calculate checksum for command string.
@@ -669,10 +662,10 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         address = addr.zfill(6)
 
         enc = f"{(int(self._enc_key) & 0xF):X}"
-        cval = f"{(int(cmd.value) & 0xF):X}"
+        cval = cmd.value # f"{(int(cmd.value) & 0xF):X}"
         roll = f"{(int(self._rolling_code) & 0xFFFF):04X}"
 
-        raw = f"A{enc}{cval}0{roll}{address}"
+        raw = f"A{enc}{cval}{roll}{address}"
         if len(raw) != 14:
             _LOGGER.error("Command build: invalid raw length %d (raw=%s)", len(raw), raw)
             raise ValueError("raw Somfy frame must be 14 hex nibbles")
