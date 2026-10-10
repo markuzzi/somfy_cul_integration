@@ -311,8 +311,9 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         ):
             self._attr_is_closed = last_state.state == CoverState.CLOSED
 
-        if not await self._load_state_from_yaml():
-            await self._save_state_to_yaml()  # save initial state
+        await self._load_state_from_yaml()
+        # save the initial state or migrate the entry to the current format
+        await self._save_state_to_yaml()
 
     async def async_reload_state(self, **kwargs: Any) -> None:
         """Reload the state from the YAML file."""
@@ -322,7 +323,7 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         await self._load_state_from_yaml()
 
     async def _save_state_to_yaml(self):
-        """Save the current state to the file using self.entity_id as the key."""
+        """Save the current state to the file using the address as the key."""
         async with _STATE_FILE_LOCK:
             state_data = await self._read_state_yaml()
             if state_data is None:
@@ -330,8 +331,13 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
                 _LOGGER.error("State of %s not saved", self.entity_id)
                 return
 
+            # Remove entries of this cover stored under another key, e.g. the
+            # entity id used by older versions
+            for key in self._find_state_keys(state_data):
+                del state_data[key]
+
             # Update state for the current address
-            state_data[self.entity_id] = self._get_state()
+            state_data[self._state_key] = self._get_state()
 
             # Save updated state back to the file
             await self.hass.async_add_executor_job(
@@ -339,16 +345,38 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
             )
 
     async def _load_state_from_yaml(self):
-        """Load the state for self.entity_id from the file, if it exists."""
+        """Load the state of this cover from the file, if it exists."""
         state_data = await self._read_state_yaml()
-
-        # Load state for the current address if it exists
-        if state_data and self.entity_id in state_data:
-            self._set_state(state_data[self.entity_id])
-        else:
+        if not state_data:
             return False
 
+        keys = self._find_state_keys(state_data)
+        if not keys:
+            return False
+
+        self._set_state(state_data[keys[0]])
         return True
+
+    @property
+    def _state_key(self) -> str:
+        """Key of this cover in the state file.
+
+        The address is used since the entity id may be changed by the user.
+        """
+        return str(self._address).upper()
+
+    def _find_state_keys(self, state_data: dict) -> list:
+        """Return the keys of this cover in the state file, preferred first."""
+        address = self._state_key.zfill(6)
+        keys = [
+            key
+            for key in state_data
+            if str(key).upper().zfill(6) == address
+        ]
+        # fallback for state files written by versions 1.0.x
+        if self.entity_id in state_data:
+            keys.append(self.entity_id)
+        return keys
 
     async def _read_state_yaml(self):
         """Load the state from the file, if it exists."""

@@ -40,7 +40,21 @@ cover:
     down_time: 13
 ```
 
-Once created, the integration will create a file name `somfy_cover_state.yaml` in your `config` directory. In this file you can manipulate the `enc_keys` and the `rolling_codes` of the covers.
+Once created, the integration will create a file name `somfy_cover_state.yaml` in your `config` directory. It stores the `enc_key` and the `rolling_code` of each cover, using the cover's address as key. You can edit these values, e.g. to take over the values of another controller. Call `somfy_cul.reload_state` afterwards or restart Home Assistant.
+
+```yaml
+ABCD:
+  current_pos: 100
+  enc_key: 3
+  rolling_code: 42
+```
+
+Do not delete this file and do not change the `address` of a cover: the cover only reacts to the address it was paired with and to rolling codes that are higher than the last one it received. Otherwise, you have to pair the cover again (see `somfy_cul.prog_cover`).
+
+### Upgrading
+
+- **From 1.0.0 to 1.0.1 or later**: addresses with less than 6 hex digits are sent padded with leading zeros since version 1.0.1 (`ABCD` is sent as `00ABCD`). Version 1.0.0 sent them unpadded, which the CUL firmware interpreted as a different address. If a cover does not react after the upgrade, pair it again using `somfy_cul.prog_cover`.
+- **From 1.0.x**: the state file used the entity id as key. Existing entries are migrated to the address automatically. Renaming an entity does no longer reset its rolling code.
 
 ## Services
 
