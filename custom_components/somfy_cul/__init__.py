@@ -75,12 +75,16 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         return False
 
     version = await hass.async_add_executor_job(cul.get_cul_version)
-    if not version:
-        _LOGGER.error("Could not read CUL version at %s", cul_path)
-        await hass.async_add_executor_job(cul.close)
-        return False
-
-    _LOGGER.info("SOMFY CUL connected (%s) at %s, baud %d", version, cul_path, baud_rate)
+    if version:
+        _LOGGER.info(
+            "SOMFY CUL connected (%s) at %s, baud %d", version, cul_path, baud_rate
+        )
+    else:
+        # Do not fail the setup. Sending may work anyway and the listener
+        # reconnects in the background. Use somfy_cul.reload_platform to retry.
+        _LOGGER.warning(
+            "Could not read CUL version at %s; continuing anyway", cul_path
+        )
 
     async def _on_ha_stop(_event) -> None:
         try:

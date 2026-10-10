@@ -91,31 +91,55 @@ class Cul:
                 if self._stop.wait(1.0):
                     break
 
-    def get_cul_version(self) -> Optional[str]:
+    def get_cul_version(self, attempts: int = 5) -> Optional[str]:
+        """Query the firmware version.
+
+        A nanoCUL resets when the port is opened and ignores input while its
+        bootloader runs. After a power loss the input buffer of the CUL may
+        also contain garbage. Thus, the query is repeated several times and
+        starts with a newline to terminate any partial line.
+        """
         if self._test:
             return "VTEST"
-        if not self._ser:
-            _LOGGER.error("No CUL serial device.")
-            return None
         msg = ""
-        try:
-            with self._wlock:
-                self._ser.reset_input_buffer()
-                self._ser.write(b"V\n")
-                self._ser.flush()
-            deadline = time.time() + 2.0
-            while time.time() < deadline and not self._stop.is_set():
-                line = self._ser.readline()
-                if not line:
+        for attempt in range(1, attempts + 1):
+            if self._stop.is_set():
+                return None
+            if not self._ser:
+                self._open_serial()
+                if not self._ser:
+                    self._stop.wait(2.0)
                     continue
-                msg = line.decode("ascii", "ignore").strip()
-                if msg.startswith("V"):
-                    return msg
-        except serial.SerialException as e:
-            _LOGGER.error("Reading CUL version failed: %s", e)
-            return None
+            try:
+                with self._wlock:
+                    self._ser.reset_input_buffer()
+                    self._ser.write(b"\nV\n")
+                    self._ser.flush()
+                deadline = time.time() + 2.0
+                while time.time() < deadline and not self._stop.is_set():
+                    line = self._ser.readline()
+                    if not line:
+                        continue
+                    msg = line.decode("ascii", "ignore").strip()
+                    if msg.startswith("V"):
+                        return msg
+            except serial.SerialException as e:
+                _LOGGER.warning("Reading CUL version failed: %s", e)
+                self._close_serial()
+            _LOGGER.debug(
+                "No version from CUL (attempt %d/%d). Response: %r",
+                attempt, attempts, msg,
+            )
         _LOGGER.warning("Timeout while reading CUL version. Response: %r", msg)
         return None
+
+    def _close_serial(self) -> None:
+        if self._ser:
+            try:
+                self._ser.close()
+            except Exception:
+                pass
+        self._ser = None
 
     def send_command(self, payload: bytes) -> bool:
         if self._test:
