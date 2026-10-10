@@ -1,13 +1,13 @@
 """Cover Platform for the Somfy MyLink component."""
 
 import asyncio
+from enum import Enum
 import logging
 import os
 import re
 import time
-from typing import Any, Final
+from typing import Any
 
-import aiofiles
 import voluptuous as vol
 import yaml
 
@@ -49,28 +49,46 @@ from .const import (
 from .cul import Cul
 
 
-class Command(vol.Enum):
+class Command(Enum):
     """Available SOMFY commands."""
 
-    MY: Final = "10"
-    STOP: Final = "10"
-    OPEN: Final = "20"
-    MY_UP: Final = "30"
-    CLOSE: Final = "40"
-    MY_DOWN: Final = "50"
-    UP_DOWN: Final = "60"
-    MY_UP_DOWN: Final = "70"
-    PROG: Final = "80"
-    WIND_SUN: Final = "90"
-    WIND_ONLY: Final = "A0"
+    MY = "10"
+    STOP = "10"  # alias of MY
+    OPEN = "20"
+    MY_UP = "30"
+    CLOSE = "40"
+    MY_DOWN = "50"
+    UP_DOWN = "60"
+    MY_UP_DOWN = "70"
+    PROG = "80"
+    WIND_SUN = "90"
+    WIND_ONLY = "A0"
 
-    POS: Final = "POS"  # custom
+    POS = "POS"  # custom
 
 
 CONFIG_FILE = "somfy_cover_state.yaml"
 
 _LOGGER = logging.getLogger(__name__)
 _STATE_FILE_LOCK = asyncio.Lock()
+
+def _read_state_file(path: str) -> dict:
+    """Read the state file (runs in the executor)."""
+    if not os.path.exists(path):  # noqa: PTH110
+        return {}
+    try:
+        with open(path, encoding="utf-8") as file:  # noqa: PTH123
+            return yaml.safe_load(file) or {}
+    except yaml.YAMLError as e:
+        _LOGGER.error("Error reading YAML file: %s", e)
+        return {}
+
+
+def _write_state_file(path: str, state_data: dict) -> None:
+    """Write the state file (runs in the executor)."""
+    with open(path, mode="w", encoding="utf-8") as file:  # noqa: PTH123
+        file.write(yaml.safe_dump(state_data, default_flow_style=False))
+
 
 PLATFORM_SCHEMA = COVER_PLATFORM_SCHEMA.extend(
     {
@@ -310,11 +328,9 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
             state_data[self.entity_id] = self._get_state()
 
             # Save updated state back to the file
-            state_file_path = self._get_state_file_path()
-            async with aiofiles.open(
-                state_file_path, mode="w", encoding="utf-8"
-            ) as file:
-                await file.write(yaml.safe_dump(state_data, default_flow_style=False))
+            await self.hass.async_add_executor_job(
+                _write_state_file, self._get_state_file_path(), state_data
+            )
 
     async def _load_state_from_yaml(self):
         """Load the state for self.entity_id from the file, if it exists."""
@@ -330,22 +346,9 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
 
     async def _read_state_yaml(self):
         """Load the state from the file, if it exists."""
-        state_file_path = self._get_state_file_path()
-        state_data = {}
-        if os.path.exists(state_file_path):  # noqa: PTH110
-            try:
-                async with aiofiles.open(state_file_path, encoding="utf-8") as file:
-                    try:
-                        content = await file.read()
-                        state_data = yaml.safe_load(content) or {}
-                    except yaml.YAMLError as e:
-                        _LOGGER.error("Error reading YAML file: %s", e)
-            except FileNotFoundError:
-                _LOGGER.debug(
-                    "State YAML file not existing: %s. Creating a new one",
-                    state_file_path,
-                )
-        return state_data
+        return await self.hass.async_add_executor_job(
+            _read_state_file, self._get_state_file_path()
+        )
 
     def _get_state_file_path(self):
         """Get the full path to the state file."""
