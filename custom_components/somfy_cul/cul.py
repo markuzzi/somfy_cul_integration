@@ -87,6 +87,9 @@ class Cul:
                 backoff *= 2
             except Exception as e:
                 _LOGGER.exception("Unexpected error in listen loop: %s", e)
+                # avoid a busy loop on persistent errors
+                if self._stop.wait(1.0):
+                    break
 
     def get_cul_version(self) -> Optional[str]:
         if self._test:
@@ -94,19 +97,23 @@ class Cul:
         if not self._ser:
             _LOGGER.error("No CUL serial device.")
             return None
-        with self._wlock:
-            self._ser.reset_input_buffer()
-            self._ser.write(b"V\n")
-            self._ser.flush()
-        deadline = time.time() + 2.0
         msg = ""
-        while time.time() < deadline and not self._stop.is_set():
-            line = self._ser.readline()
-            if not line:
-                continue
-            msg = line.decode("ascii", "ignore").strip()
-            if msg.startswith("V"):
-                return msg
+        try:
+            with self._wlock:
+                self._ser.reset_input_buffer()
+                self._ser.write(b"V\n")
+                self._ser.flush()
+            deadline = time.time() + 2.0
+            while time.time() < deadline and not self._stop.is_set():
+                line = self._ser.readline()
+                if not line:
+                    continue
+                msg = line.decode("ascii", "ignore").strip()
+                if msg.startswith("V"):
+                    return msg
+        except serial.SerialException as e:
+            _LOGGER.error("Reading CUL version failed: %s", e)
+            return None
         _LOGGER.warning("Timeout while reading CUL version. Response: %r", msg)
         return None
 

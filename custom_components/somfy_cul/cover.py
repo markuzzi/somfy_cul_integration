@@ -1,4 +1,4 @@
-"""Cover Platform for the Somfy MyLink component."""
+"""Cover Platform for the Somfy CUL component."""
 
 import asyncio
 from enum import Enum
@@ -21,7 +21,7 @@ from homeassistant.components.cover import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
@@ -39,7 +39,6 @@ from .const import (
     CONF_TYPE,
     DATA_SOMFY_CUL,
     DOMAIN,
-    MANUFACTURER,
     SERVICE_CLOSE,
     SERVICE_OPEN,
     SERVICE_PROG,
@@ -72,22 +71,33 @@ CONFIG_FILE = "somfy_cover_state.yaml"
 _LOGGER = logging.getLogger(__name__)
 _STATE_FILE_LOCK = asyncio.Lock()
 
-def _read_state_file(path: str) -> dict:
-    """Read the state file (runs in the executor)."""
+
+def _read_state_file(path: str) -> dict | None:
+    """Read the state file (runs in the executor).
+
+    Returns None if the file exists but cannot be read.
+    """
     if not os.path.exists(path):  # noqa: PTH110
         return {}
     try:
         with open(path, encoding="utf-8") as file:  # noqa: PTH123
-            return yaml.safe_load(file) or {}
-    except yaml.YAMLError as e:
-        _LOGGER.error("Error reading YAML file: %s", e)
-        return {}
+            state_data = yaml.safe_load(file) or {}
+    except (OSError, yaml.YAMLError) as e:
+        _LOGGER.error("Error reading state file %s: %s", path, e)
+        return None
+    if not isinstance(state_data, dict):
+        _LOGGER.error("Invalid content in state file %s", path)
+        return None
+    return state_data
 
 
 def _write_state_file(path: str, state_data: dict) -> None:
     """Write the state file (runs in the executor)."""
-    with open(path, mode="w", encoding="utf-8") as file:  # noqa: PTH123
-        file.write(yaml.safe_dump(state_data, default_flow_style=False))
+    try:
+        with open(path, mode="w", encoding="utf-8") as file:  # noqa: PTH123
+            file.write(yaml.safe_dump(state_data, default_flow_style=False))
+    except OSError as e:
+        _LOGGER.error("Error writing state file %s: %s", path, e)
 
 
 PLATFORM_SCHEMA = COVER_PLATFORM_SCHEMA.extend(
@@ -102,15 +112,14 @@ PLATFORM_SCHEMA = COVER_PLATFORM_SCHEMA.extend(
 )
 
 
-def setup_platform(
+async def async_setup_platform(
     hass: HomeAssistant,
     config: ConfigType,
-    add_entities: AddEntitiesCallback,
+    async_add_entities: AddEntitiesCallback,
     discovery_info: DiscoveryInfoType | None = None,
 ) -> None:
     """Discover and configure Somfy covers."""
-    somfy_cul_data = hass.data.get(DOMAIN, {})
-    somfy_cul = somfy_cul_data[DATA_SOMFY_CUL] or None
+    somfy_cul = hass.data.get(DOMAIN, {}).get(DATA_SOMFY_CUL)
 
     if not somfy_cul:
         _LOGGER.warning("SOMFY CUL device is not available")
@@ -132,7 +141,14 @@ def setup_platform(
         cover_config["address"],
     )
 
-    add_entities([cover])
+    async_add_entities([cover])
+
+    platform = entity_platform.async_get_current_platform()
+    platform.async_register_entity_service(SERVICE_PROG, {}, "async_prog_cover")
+    platform.async_register_entity_service(SERVICE_OPEN, {}, "async_open_cover")
+    platform.async_register_entity_service(SERVICE_CLOSE, {}, "async_close_cover")
+    platform.async_register_entity_service(SERVICE_STOP, {}, "async_stop_cover")
+    platform.async_register_entity_service(SERVICE_RELOAD, {}, "async_reload_state")
 
 
 class SomfyCulShade(RestoreEntity, CoverEntity):
@@ -205,84 +221,83 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
             "rolling_code": self._rolling_code,
         }
 
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self._address)},
-            manufacturer=MANUFACTURER,
-            name=name,
-        )
+        self._pending_saves: set[asyncio.Task] = set()
 
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close the cover."""
         cmd = Command.CLOSE if not self._reverse else Command.OPEN
-        self.send_command(cmd)
+        await self.async_send_command(cmd)
 
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open the cover."""
         cmd = Command.CLOSE if self._reverse else Command.OPEN
-        self.send_command(cmd)
+        await self.async_send_command(cmd)
 
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop the cover."""
-        cmd = Command.STOP
-        self.send_command(cmd)
+        await self.async_send_command(Command.STOP)
 
-    async def async_set_cover_position(self, **kwargs):
+    async def async_set_cover_position(self, **kwargs: Any) -> None:
         """Move the cover to a specific position."""
         if (position := kwargs.get(ATTR_POSITION)) is None:
             _LOGGER.debug("Argument `position` is missing in set_cover_position")
             return
 
-        cmd = Command.POS
-        self.send_command(cmd, int(position))
+        await self.async_send_command(Command.POS, int(position))
 
-    def send_command(self, cmd: Command, target_pos=None):
-        """Send a command to the CUL."""
+    async def async_send_command(self, cmd: Command, target_pos=None) -> None:
+        """Update the state and send a command to the CUL."""
 
         cmd, time_to_stop = self._update_state(cmd, target_pos)
         if cmd is None:
             return
 
-        frame = self._command_string(cmd)
+        # a new command replaces a pending stop of a previous positioning move
+        self._cancel_pending_stop()
 
-        if not self._somfy_cul:
-            _LOGGER.error("CUL handle missing; command %s dropped", cmd)
+        if not await self._async_transmit(cmd):
             return
-
-        try:
-            self._somfy_cul.send_command(frame)
-        except Exception as e:
-            _LOGGER.exception("Failed to send Somfy frame: %s", e)
-            return
-
-        self._increase_rolling_code()
-
-        if getattr(self, "_cancel_stop_timer", None):
-            try:
-                self._cancel_stop_timer()
-            finally:
-                self._cancel_stop_timer = None
 
         if time_to_stop and time_to_stop > 0:
-            async def _cb(_now):
-                # optional: prüfen, ob inzwischen ein anderer Move läuft
-                self._send_stop_command()
+            self._cancel_stop_timer = async_call_later(
+                self.hass, time_to_stop, self._async_stop_timer_fired
+            )
 
-            # async_call_later gibt ein Cancel-Callable zurück -> merken!
-            self._cancel_stop_timer = async_call_later(self.hass, time_to_stop, _cb)
+    def _cancel_pending_stop(self) -> None:
+        if self._cancel_stop_timer:
+            self._cancel_stop_timer()
+            self._cancel_stop_timer = None
 
+    async def _async_stop_timer_fired(self, _now) -> None:
+        self._cancel_stop_timer = None
+        await self._async_transmit(Command.STOP)
 
-    def _send_stop_command(self):
+    async def _async_transmit(self, cmd: Command) -> bool:
+        """Send a single frame and consume a rolling code."""
+        if not self._somfy_cul:
+            _LOGGER.error("CUL handle missing; command %s dropped", cmd)
+            return False
+
+        frame = self._command_string(cmd)
+        # consume the rolling code before awaiting so that concurrent
+        # commands never reuse the same code
+        self._increase_rolling_code()
+
         try:
-            self._somfy_cul.send_command(self._command_string(Command.STOP))
-        finally:
-            self._increase_rolling_code()
+            sent = await self.hass.async_add_executor_job(
+                self._somfy_cul.send_command, frame
+            )
+        except Exception:
+            _LOGGER.exception("Failed to send Somfy frame %r", frame)
+            return False
 
-    async def async_prog_cover(self):
+        if not sent:
+            _LOGGER.error("Failed to send Somfy frame %r", frame)
+        return sent
+
+    async def async_prog_cover(self, **kwargs: Any) -> None:
         """Handle the async_prog_cover service."""
-        try:
-            self._somfy_cul.send_command(self._command_string(Command.PROG))
-        finally:
-            self._increase_rolling_code()
+        await self._async_transmit(Command.PROG)
 
     async def async_added_to_hass(self) -> None:
         """Complete the initialization."""
@@ -299,30 +314,21 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         if not await self._load_state_from_yaml():
             await self._save_state_to_yaml()  # save initial state
 
-        self.platform.async_register_entity_service(
-            SERVICE_PROG, {}, "async_prog_cover"
-        )
-        self.platform.async_register_entity_service(
-            SERVICE_OPEN, {}, "async_open_cover"
-        )
-        self.platform.async_register_entity_service(
-            SERVICE_CLOSE, {}, "async_close_cover"
-        )
-        self.platform.async_register_entity_service(
-            SERVICE_STOP, {}, "async_stop_cover"
-        )
-        self.platform.async_register_entity_service(
-            SERVICE_RELOAD, {}, "async_reload_state"
-        )
-
     async def async_reload_state(self, **kwargs: Any) -> None:
         """Reload the state from the YAML file."""
+        # let pending writes finish, otherwise an outdated rolling code is loaded
+        if self._pending_saves:
+            await asyncio.gather(*self._pending_saves)
         await self._load_state_from_yaml()
 
     async def _save_state_to_yaml(self):
         """Save the current state to the file using self.entity_id as the key."""
         async with _STATE_FILE_LOCK:
             state_data = await self._read_state_yaml()
+            if state_data is None:
+                # do not overwrite the rolling codes of all other covers
+                _LOGGER.error("State of %s not saved", self.entity_id)
+                return
 
             # Update state for the current address
             state_data[self.entity_id] = self._get_state()
@@ -337,7 +343,7 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         state_data = await self._read_state_yaml()
 
         # Load state for the current address if it exists
-        if self.entity_id in state_data:
+        if state_data and self.entity_id in state_data:
             self._set_state(state_data[self.entity_id])
         else:
             return False
@@ -372,18 +378,17 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
             "enc_key": self._enc_key,
             "rolling_code": self._rolling_code,
         }
-        self.schedule_update_ha_state(force_refresh=True)
+        self.async_write_ha_state()
 
     def _async_save_state(self):
         self._attr_extra_state_attributes = {
             "enc_key": self._enc_key,
             "rolling_code": self._rolling_code,
         }
-        self.schedule_update_ha_state()
-        self.hass.loop.call_soon_threadsafe(self._async_save_state_task)
-
-    def _async_save_state_task(self):
-        self.hass.async_create_task(self._save_state_to_yaml())
+        self.async_write_ha_state()
+        task = self.hass.async_create_task(self._save_state_to_yaml())
+        self._pending_saves.add(task)
+        task.add_done_callback(self._pending_saves.discard)
 
     def _increase_rolling_code(self):
         """Increment rolling_code, roll over when crossing the 16 bit boundary.
@@ -426,7 +431,7 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         _LOGGER.debug("Write state position for device: %s", self._attr_name)
         self._attr_is_opening = False
         self._attr_is_closing = False
-        self._attr_is_closed = position >= 99
+        self._attr_is_closed = position <= 0
         self._attr_current_cover_position = position
         self._async_save_state()
 
@@ -461,7 +466,7 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         self, target_position: int | None = None
     ) -> tuple[Command, float]:
         cur = self._attr_current_cover_position or 0
-        target = target_position or 100
+        target = 100 if target_position is None else target_position
 
         if target > cur:
             cmd = Command.OPEN
@@ -494,8 +499,12 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         if cmd == Command.POS:
             cmd, time_to_stop = self._calculate_position_command(target_position)
             if cmd is None or time_to_stop is None:
-                _LOGGER.error("Position cannot be set")
+                _LOGGER.debug("Position cannot be set")
                 return None, None
+
+            self._attr_is_opening = cmd == Command.OPEN
+            self._attr_is_closing = cmd == Command.CLOSE
+            self.async_write_ha_state()
 
             async def _handle_timer(_now):
                 self._write_state_pos(target_position)
@@ -570,17 +579,15 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
                 cmd, time_to_stop = self._start_update_state_timer(cmd, target_position)
             else:
                 if cmd == Command.POS:
-                    if target_position is None or _move_time is None:
-                        _LOGGER.error("Position cannot be set: missing target. Did you set up up_time and down_time?")
-                        return None, None
-                    self._write_state(cmd, position=target_position)
+                    _LOGGER.error("Position cannot be set. Did you set up up_time and down_time?")
+                    return None, None
                 else:
                     self._write_state(cmd)
 
         elif cmd == Command.STOP:
             current_pos = (
                 50
-                if not self._attr_current_cover_position
+                if self._attr_current_cover_position is None
                 else self._attr_current_cover_position
             )
             current_time = time.time()

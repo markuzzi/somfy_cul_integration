@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import logging
-
 import asyncio
-import time
 from collections import deque
+import logging
+import time
+
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.typing import ConfigType
@@ -34,8 +32,6 @@ from .cul import Cul
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.COVER]
-
 RAW_COMMAND_SERVICE_SCHEMA = vol.Schema(
     {
         vol.Required("command"): cv.string,
@@ -48,6 +44,7 @@ CONFIG_SCHEMA = vol.Schema(
         DOMAIN: {
             vol.Optional(CONF_CUL_PATH, default="/dev/ttyAMA0"): cv.string,
             vol.Optional(CONF_BAUD_RATE, default=38400): vol.Coerce(int),
+            vol.Optional(CONF_DEBUG_RX, default=False): cv.boolean,
         }
     },
     extra=vol.ALLOW_EXTRA,
@@ -70,25 +67,24 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
     baud_rate = int(conf.get(CONF_BAUD_RATE, 38400))
     debug_rx: bool = bool(conf.get(CONF_DEBUG_RX, False))
-    cul = None
 
     try:
-        cul = Cul(cul_path, baud_rate)
+        cul = await hass.async_add_executor_job(Cul, cul_path, baud_rate)
     except ValueError as e:
         _LOGGER.error("Could not connect to CUL at %s: %s", cul_path, e)
         return False
 
-    version = cul.get_cul_version()
+    version = await hass.async_add_executor_job(cul.get_cul_version)
     if not version:
         _LOGGER.error("Could not read CUL version at %s", cul_path)
-        cul.close()
+        await hass.async_add_executor_job(cul.close)
         return False
 
     _LOGGER.info("SOMFY CUL connected (%s) at %s, baud %d", version, cul_path, baud_rate)
 
     async def _on_ha_stop(_event) -> None:
         try:
-            cul.close()
+            await hass.async_add_executor_job(cul.close)
             _LOGGER.info("SOMFY CUL at %s closed on shutdown.", cul_path)
         except Exception as e:
             _LOGGER.debug("Error while closing CUL at shutdown: %s", e)
@@ -97,9 +93,13 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
     rx_buffer = deque(maxlen=200)
     hass.data.setdefault(DOMAIN, {})[DATA_RX_BUFFER] = rx_buffer
+    # total number of received lines; the buffer length stops growing at maxlen
+    rx_count = 0
 
     def _on_rx(line: str) -> None:
+        nonlocal rx_count
         rx_buffer.append(line)
+        rx_count += 1
 
         if debug_rx and _LOGGER.isEnabledFor(logging.DEBUG):
             _LOGGER.debug("SOMFY CUL RX: %s", line)
@@ -151,7 +151,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         command: str = call.data["command"]
         timeout: float = call.data.get("timeout", 2.0)
 
-        rx_buffer_snapshot_index = len(rx_buffer)
+        rx_count_before = rx_count
 
         success = await hass.async_add_executor_job(somfy_cul.send_line, command)
         if not success:
@@ -160,15 +160,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
         if timeout > 0:
             deadline = time.monotonic() + timeout
-            while len(rx_buffer) == rx_buffer_snapshot_index and time.monotonic() < deadline:
+            while rx_count == rx_count_before and time.monotonic() < deadline:  # noqa: ASYNC110
                 await asyncio.sleep(0.1)
 
-        new_messages = []
-        current_len = len(rx_buffer)
-        if current_len > rx_buffer_snapshot_index:
-            # copy to avoid holding reference while buffer mutates
-            buffer_copy = list(rx_buffer)
-            new_messages = buffer_copy[rx_buffer_snapshot_index:current_len]
+        new_count = min(rx_count - rx_count_before, len(rx_buffer))
+        new_messages = list(rx_buffer)[-new_count:] if new_count else []
 
         if new_messages:
             for msg in new_messages:
@@ -190,7 +186,3 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     )
 
     return True
-
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry."""
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

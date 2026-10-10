@@ -1,43 +1,38 @@
 prog_cover:
   name: "Prog Cover"
   description: "Set the cover into prog mode"
-  fields:
-    entity_id:
-      name: "Entity ID"
-      description: "The entity ID of the cover"
-      example: cover.somfy_cul_abcd
+  target:
+    entity:
+      integration: somfy_cul
+      domain: cover
 open_cover:
   name: "Open Cover"
   description: "Open the cover"
-  fields:
-    entity_id:
-      name: "Entity ID"
-      description: "The entity ID of the cover"
-      example: cover.somfy_cul_abcd
+  target:
+    entity:
+      integration: somfy_cul
+      domain: cover
 close_cover:
   name: "Close Cover"
   description: "Close the cover"
-  fields:
-    entity_id:
-      name: "Entity ID"
-      description: "The entity ID of the cover"
-      example: cover.somfy_cul_abcd
+  target:
+    entity:
+      integration: somfy_cul
+      domain: cover
 stop_cover:
   name: "Stop Cover"
   description: "Stop the cover"
-  fields:
-    entity_id:
-      name: "Entity ID"
-      description: "The entity ID of the cover"
-      example: cover.somfy_cul_abcd
+  target:
+    entity:
+      integration: somfy_cul
+      domain: cover
 reload_state:
   name: "Reload State"
   description: "Reload the state YAML file"
-  fields:
-    entity_id:
-      name: "Entity ID"
-      description: "The entity ID of the cover"
-      example: cover.somfy_cul_abcd
+  target:
+    entity:
+      integration: somfy_cul
+      domain: cover
 reload_platform:
   name: "Reload SOMFY Platform"
   description: "Reconnect to the SOMFY CUL stick and restart the listener thread"

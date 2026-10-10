@@ -24,11 +24,12 @@ Create the CUL hub by adding the following to your `configuration.yaml`.
 somfy_cul:
   cul_path: /dev/ttyAMA0
   baud_rate: 38400
+  debug_rx: false  # optional, log received frames at debug level
 ```
 
 ### Covers / Shades
 
-Add the following to your `configuration.yaml`. If you have multiplt covers, you need to add multiple items.
+Add the following to your `configuration.yaml`. If you have multiple covers, you need to add multiple items.
 
 ```yaml
 cover:
@@ -45,15 +46,23 @@ Once created, the integration will create a file name `somfy_cover_state.yaml` i
 
 The integration registers several services to directly control or manage your SOMFY RTS covers.
 
-| Service | Description | Example |
-|---------|-------------|---------|
-| `somfy_cul.prog_cover` | Put a cover into **programming mode** (needed to pair or re-pair a remote/cover). | ```yaml\nservice: somfy_cul.prog_cover\ndata:\n  entity_id: cover.somfy_cul_abcd\n``` |
-| `somfy_cul.open_cover` | Open the specified cover. | ```yaml\nservice: somfy_cul.open_cover\ndata:\n  entity_id: cover.somfy_cul_abcd\n``` |
-| `somfy_cul.close_cover` | Close the specified cover. | ```yaml\nservice: somfy_cul.close_cover\ndata:\n  entity_id: cover.somfy_cul_abcd\n``` |
-| `somfy_cul.stop_cover` | Stop the cover’s movement immediately. | ```yaml\nservice: somfy_cul.stop_cover\ndata:\n  entity_id: cover.somfy_cul_abcd\n``` |
-| `somfy_cul.reload_state` | Reload the `somfy_cover_state.yaml` file from disk. Useful if you manually edited encryption keys or rolling codes. | ```yaml\nservice: somfy_cul.reload_state\ndata:\n  entity_id: cover.somfy_cul_abcd\n``` |
+| Service | Description |
+|---------|-------------|
+| `somfy_cul.prog_cover` | Put a cover into **programming mode** (needed to pair or re-pair a remote/cover). |
+| `somfy_cul.open_cover` | Open the specified cover. |
+| `somfy_cul.close_cover` | Close the specified cover. |
+| `somfy_cul.stop_cover` | Stop the cover's movement immediately. |
+| `somfy_cul.reload_state` | Reload the `somfy_cover_state.yaml` file from disk. Useful if you manually edited encryption keys or rolling codes. |
+| `somfy_cul.reload_platform` | Reconnect to the CUL stick and restart the listener. |
+| `somfy_cul.send_raw_command` | Send a raw command to the CUL and log the response. |
 
-All services require at least the `entity_id` of the target cover.
+The cover services target one or more covers, for example:
+
+```yaml
+action: somfy_cul.prog_cover
+target:
+  entity_id: cover.bad
+```
 
 # Contributing To The Project
 
