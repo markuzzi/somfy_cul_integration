@@ -2,7 +2,9 @@
 
 # SOMFY RTS CUL
 
-This software package provides a homeasstant integration to connect a CUL wireless transceiver to control SOMFY shades.
+This software package provides a Home Assistant integration to connect a CUL wireless transceiver to control SOMFY RTS shades.
+
+Only **Somfy RTS** (433.42 MHz) is supported. **Somfy io-homecontrol** (868 MHz, e.g. "Situo io" remotes) uses an encrypted, bidirectional protocol that cannot be controlled with a CUL; use a TaHoma or Connexoon box with the [Overkiz integration](https://www.home-assistant.io/integrations/overkiz/) instead. You need a CUL with a firmware supporting Somfy RTS (culfw or a-culfw, command `Ys`). A CUL for 433 MHz is recommended, 868 MHz sticks work with a reduced range.
 
 Further information about the CUL: [Product page](http://busware.de/tiki-index.php?page=CUL), [firmware details](http://culfw.de/).
 
