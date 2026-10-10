@@ -428,6 +428,8 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         self._attr_current_cover_position = state.get(
             ATTR_CURRENT_POS, self._attr_current_cover_position
         )
+        if self._attr_current_cover_position is not None:
+            self._attr_is_closed = self._attr_current_cover_position <= 0
         self._attr_extra_state_attributes = {
             "enc_key": self._enc_key,
             "rolling_code": self._rolling_code,
