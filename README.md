@@ -100,6 +100,10 @@ target:
   entity_id: cover.bad
 ```
 
+## Limitations
+
+- **Position tracking**: Somfy RTS covers do not report their position. The integration calculates the position from `up_time` and `down_time`. Commands from other remotes or sensors (e.g. a wind sensor) are not noticed, since culfw cannot receive Somfy RTS frames. Thus, linking remotes and sensors is not supported. If you need this, use a receiver supporting Somfy RTS reception, e.g. [ESPSomfy-RTS](https://github.com/rstrouse/ESPSomfy-RTS) or an RFXtrx.
+
 # Contributing To The Project
 
 ![python badge](https://img.shields.io/badge/Made%20with-Python-orange)
