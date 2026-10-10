@@ -1,0 +1,177 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "CUL verbinden",
+        "description": "Wähle den seriellen Port des CUL-Sticks. Nutze möglichst den Pfad unter /dev/serial/by-id/, er ändert sich nach einem Neustart nicht.",
+        "data": {
+          "cul_path": "Serieller Port",
+          "baud_rate": "Baudrate"
+        },
+        "data_description": {
+          "cul_path": "Pfad des seriellen Geräts, z. B. /dev/ttyAMA0 oder /dev/serial/by-id/usb-…",
+          "baud_rate": "38400 bei den meisten CUL-Sticks"
+        }
+      },
+      "reconfigure": {
+        "title": "CUL-Verbindung ändern",
+        "data": {
+          "cul_path": "Serieller Port",
+          "baud_rate": "Baudrate"
+        },
+        "data_description": {
+          "cul_path": "Pfad des seriellen Geräts, z. B. /dev/ttyAMA0 oder /dev/serial/by-id/usb-…",
+          "baud_rate": "38400 bei den meisten CUL-Sticks"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Der serielle Port konnte nicht geöffnet werden. Prüfe den Pfad und ob der Stick eingesteckt ist.",
+      "invalid_baud_rate": "Ungültige Baudrate",
+      "unknown": "Unerwarteter Fehler"
+    },
+    "abort": {
+      "single_instance_allowed": "Es kann nur ein CUL-Stick eingerichtet werden.",
+      "already_configured": "Der CUL ist bereits eingerichtet.",
+      "reconfigure_successful": "Die Verbindung wurde aktualisiert."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Somfy CUL Optionen",
+        "data": {
+          "debug_rx": "Empfangene Frames protokollieren"
+        },
+        "data_description": {
+          "debug_rx": "Jede vom CUL empfangene Zeile ins Debug-Log schreiben."
+        }
+      }
+    }
+  },
+  "config_subentries": {
+    "cover": {
+      "entry_type": "Rollladen",
+      "initiate_flow": {
+        "user": "Rollladen hinzufügen"
+      },
+      "step": {
+        "user": {
+          "title": "Somfy-RTS-Rollladen hinzufügen",
+          "description": "Die Adresse ist der Kanal, mit dem der Rollladen gekoppelt ist (1 bis 6 Hex-Ziffern). Wähle für einen neuen Rollladen eine freie Adresse und kopple ihn danach mit dem Dienst prog_cover. Öffnungs- und Schließzeit werden für das Anfahren von Positionen benötigt.",
+          "data": {
+            "name": "Name",
+            "address": "Adresse",
+            "device_class": "Typ",
+            "up_time": "Öffnungszeit",
+            "down_time": "Schließzeit",
+            "reversed": "Richtung umkehren"
+          },
+          "data_description": {
+            "address": "Hex-Adresse, z. B. ABCD",
+            "up_time": "Sekunden, die der Rollladen zum vollständigen Öffnen braucht",
+            "down_time": "Sekunden, die der Rollladen zum vollständigen Schließen braucht",
+            "reversed": "Befehle zum Öffnen und Schließen vertauschen"
+          }
+        },
+        "reconfigure": {
+          "title": "Rollladen {address} ändern",
+          "description": "Nach einer Änderung der Adresse muss der Rollladen neu gekoppelt werden.",
+          "data": {
+            "name": "Name",
+            "address": "Adresse",
+            "device_class": "Typ",
+            "up_time": "Öffnungszeit",
+            "down_time": "Schließzeit",
+            "reversed": "Richtung umkehren"
+          },
+          "data_description": {
+            "address": "Hex-Adresse, z. B. ABCD",
+            "up_time": "Sekunden, die der Rollladen zum vollständigen Öffnen braucht",
+            "down_time": "Sekunden, die der Rollladen zum vollständigen Schließen braucht",
+            "reversed": "Befehle zum Öffnen und Schließen vertauschen"
+          }
+        }
+      },
+      "error": {
+        "invalid_address": "Die Adresse muss aus 1 bis 6 Hex-Ziffern bestehen (0-9, A-F).",
+        "invalid_name": "Gib einen Namen ein.",
+        "already_configured": "Ein Rollladen mit dieser Adresse ist bereits eingerichtet."
+      },
+      "abort": {
+        "reconfigure_successful": "Der Rollladen wurde aktualisiert."
+      }
+    }
+  },
+  "selector": {
+    "cover_device_class": {
+      "options": {
+        "awning": "Markise",
+        "blind": "Jalousie",
+        "curtain": "Vorhang",
+        "damper": "Klappe",
+        "door": "Tür",
+        "garage": "Garagentor",
+        "gate": "Tor",
+        "shade": "Rollo",
+        "shutter": "Rollladen",
+        "window": "Fenster"
+      }
+    }
+  },
+  "issues": {
+    "yaml_imported": {
+      "title": "Somfy CUL: YAML-Konfiguration importiert",
+      "description": "Die Somfy-CUL-Konfiguration aus der configuration.yaml wurde importiert. CUL und Rollläden lassen sich jetzt unter Einstellungen → Geräte & Dienste → Somfy CUL verwalten.\n\nDie YAML-Konfiguration funktioniert weiterhin: Dort hinzugefügte Rollläden werden beim Start importiert. Bereits vorhandene Rollläden werden durch YAML nicht mehr verändert, bearbeite sie stattdessen in der Oberfläche. Entferne die Einträge `somfy_cul` und `cover` aus der configuration.yaml, um diese Meldung loszuwerden."
+    },
+    "yaml_import_failed": {
+      "title": "Somfy CUL: YAML-Konfiguration konnte nicht importiert werden",
+      "description": "Die Somfy-CUL-Konfiguration für {cul_path} konnte nicht importiert werden ({reason}). Prüfe die Konfiguration oder richte die Integration in der Oberfläche ein."
+    }
+  },
+  "exceptions": {
+    "not_initialized": {
+      "message": "Somfy CUL ist nicht eingerichtet oder nicht verbunden."
+    }
+  },
+  "services": {
+    "prog_cover": {
+      "name": "Rollladen koppeln",
+      "description": "Sendet den PROG-Befehl zum Koppeln des Rollladens."
+    },
+    "open_cover": {
+      "name": "Rollladen öffnen",
+      "description": "Öffnet den Rollladen."
+    },
+    "close_cover": {
+      "name": "Rollladen schließen",
+      "description": "Schließt den Rollladen."
+    },
+    "stop_cover": {
+      "name": "Rollladen stoppen",
+      "description": "Stoppt den Rollladen."
+    },
+    "reload_state": {
+      "name": "Status neu laden",
+      "description": "Lädt Schlüssel und Rolling Code aus somfy_cover_state.yaml neu."
+    },
+    "reload_platform": {
+      "name": "CUL neu verbinden",
+      "description": "Verbindet den CUL-Stick neu und startet den Empfang."
+    },
+    "send_raw_command": {
+      "name": "Rohbefehl senden",
+      "description": "Sendet einen Rohbefehl an den CUL und protokolliert die Antwort.",
+      "fields": {
+        "command": {
+          "name": "Befehl",
+          "description": "Rohbefehl ohne Zeilenumbruch, z. B. V"
+        },
+        "timeout": {
+          "name": "Timeout",
+          "description": "Sekunden, die auf eine Antwort gewartet wird"
+        }
+      }
+    }
+  }
+}

@@ -18,29 +18,39 @@ SOMFY RTS CUL Integration can be installed via [HACS](https://hacs.xyz/), or by 
 
 ## Configuration
 
-### CUL
+The integration is configured in the UI. The YAML configuration of earlier versions is still supported, see below.
 
-Create the CUL hub by adding the following to your `configuration.yaml`.
+### Setup in the UI
+
+1. Go to **Settings → Devices & services → Add integration** and search for **Somfy CUL**.
+2. Select the serial port of the CUL stick (prefer the `/dev/serial/by-id/…` path, it does not change after a reboot) and the baud rate (38400 for most sticks).
+3. Open the Somfy CUL entry and use **Add cover** to add a cover with its name, address, type, up and down time.
+
+The **address** is the RTS channel the cover is paired with (1 to 6 hex digits, e.g. `ABCD`). For a new cover, choose any unused address and pair the cover afterwards with the `somfy_cul.prog_cover` action (see below). The **up and down time** in seconds are needed for setting positions; without them, the cover can only be opened, closed and stopped.
+
+Each cover can be changed later via its **Reconfigure** menu entry; the entry is reloaded automatically. Changing the address requires pairing the cover again. The **Configure** button of the entry contains the option to log received frames.
+
+### YAML configuration
+
+The YAML configuration of version 1.x keeps working: it is imported into the UI configuration at startup. The CUL is imported once; covers in YAML that do not exist yet are added at every startup, so covers can still be added in YAML. Covers that already exist are **not** changed by YAML anymore, change them in the UI instead. Home Assistant shows a repair message after the import; you can remove the YAML configuration to get rid of it.
 
 ```yaml
 somfy_cul:
   cul_path: /dev/ttyAMA0
   baud_rate: 38400
   debug_rx: false  # optional, log received frames at debug level
-```
 
-### Covers / Shades
-
-Add the following to your `configuration.yaml`. If you have multiple covers, you need to add multiple items.
-
-```yaml
 cover:
   - platform: somfy_cul
     name: "Bad"
     address: "ABCD"
     up_time: 16
     down_time: 13
+    device_class: shutter  # optional; "shutter:" is accepted as legacy key
+    reversed: false        # optional
 ```
+
+### State file
 
 Once created, the integration will create a file name `somfy_cover_state.yaml` in your `config` directory. It stores the `enc_key` and the `rolling_code` of each cover, using the cover's address as key. You can edit these values, e.g. to take over the values of another controller. Call `somfy_cul.reload_state` afterwards or restart Home Assistant.
 
@@ -59,7 +69,7 @@ To keep the pairing of your covers, take over the address, the encryption key an
 
 | FHEM (`10_SOMFY`) | Home Assistant |
 |-------------------|----------------|
-| `address` (e.g. `11111F`) | `address` in `configuration.yaml` |
+| `address` (e.g. `11111F`) | `address` of the cover |
 | `enc-key` (e.g. `A5`) | `enc_key` in `somfy_cover_state.yaml` |
 | `rolling-code` (e.g. `012C`) | `rolling_code` in `somfy_cover_state.yaml` |
 
@@ -77,6 +87,7 @@ After a restart or `somfy_cul.reload_state`, the values are stored as decimal nu
 
 - **From 1.0.0 to 1.0.1 or later**: addresses with less than 6 hex digits are sent padded with leading zeros since version 1.0.1 (`ABCD` is sent as `00ABCD`). Version 1.0.0 sent them unpadded, which the CUL firmware interpreted as a different address. If a cover does not react after the upgrade, pair it again using `somfy_cul.prog_cover`.
 - **From 1.0.x**: the state file used the entity id as key. Existing entries are migrated to the address automatically. Renaming an entity does no longer reset its rolling code.
+- **From 1.x to 1.2.0**: the YAML configuration is imported into the UI, see above. Entity ids and the state file are kept. Each cover now has a device; empty devices left over from version 1.0.x can be deleted.
 
 ## Services
 

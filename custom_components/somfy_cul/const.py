@@ -6,13 +6,20 @@ from typing import Final
 
 DOMAIN = "somfy_cul"
 
-# Config flow
-CONF_CUL_PATH: Final = "cul_path"  # /dev/ttyAMA0
-CONF_BAUD_RATE: Final = "baud_rate"  # 38400
-CONF_DEBUG_RX = "debug_rx"
+PLATFORMS: Final = ["cover"]
 
+# Hub (config entry)
+CONF_CUL_PATH: Final = "cul_path"
+CONF_BAUD_RATE: Final = "baud_rate"
+CONF_DEBUG_RX: Final = "debug_rx"
+DEFAULT_CUL_PATH: Final = "/dev/ttyAMA0"
+DEFAULT_BAUD_RATE: Final = 38400
+
+# Cover (config subentry)
+SUBENTRY_TYPE_COVER: Final = "cover"
 CONF_NAME: Final = "name"
-CONF_TYPE: Final = "shutter"
+CONF_TYPE: Final = "shutter"  # legacy YAML key for the device class
+CONF_DEVICE_CLASS: Final = "device_class"
 CONF_ADDRESS: Final = "address"
 CONF_REVERSED: Final = "reversed"
 
@@ -21,10 +28,6 @@ ATTR_ROLLING_CODE: Final = "rolling_code"
 ATTR_UP_TIME: Final = "up_time"
 ATTR_DOWN_TIME: Final = "down_time"
 ATTR_CURRENT_POS: Final = "current_pos"
-
-DATA_SOMFY_CUL = "somfy_cul_data"
-DATA_RX_BUFFER = "rx_buffer"
-DATA_RX_CALLBACK = "rx_callback"
 
 MANUFACTURER = "Somfy"
 

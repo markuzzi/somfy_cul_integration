@@ -1,0 +1,177 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect the CUL",
+        "description": "Select the serial port of the CUL stick. Use the /dev/serial/by-id/ path if available, it does not change after a reboot.",
+        "data": {
+          "cul_path": "Serial port",
+          "baud_rate": "Baud rate"
+        },
+        "data_description": {
+          "cul_path": "Path of the serial device, e.g. /dev/ttyAMA0 or /dev/serial/by-id/usb-…",
+          "baud_rate": "38400 for most CUL sticks"
+        }
+      },
+      "reconfigure": {
+        "title": "Change the CUL connection",
+        "data": {
+          "cul_path": "Serial port",
+          "baud_rate": "Baud rate"
+        },
+        "data_description": {
+          "cul_path": "Path of the serial device, e.g. /dev/ttyAMA0 or /dev/serial/by-id/usb-…",
+          "baud_rate": "38400 for most CUL sticks"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "The serial port could not be opened. Check the path and whether the stick is plugged in.",
+      "invalid_baud_rate": "Invalid baud rate",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "single_instance_allowed": "Only one CUL stick can be configured.",
+      "already_configured": "The CUL is already configured.",
+      "reconfigure_successful": "The connection has been updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Somfy CUL options",
+        "data": {
+          "debug_rx": "Log received frames"
+        },
+        "data_description": {
+          "debug_rx": "Write every line received from the CUL to the debug log."
+        }
+      }
+    }
+  },
+  "config_subentries": {
+    "cover": {
+      "entry_type": "Cover",
+      "initiate_flow": {
+        "user": "Add cover"
+      },
+      "step": {
+        "user": {
+          "title": "Add a Somfy RTS cover",
+          "description": "The address is the channel the cover is paired with (1 to 6 hex digits). Choose a free address for a new cover and pair it with the prog_cover service afterwards. Up and down time are needed for setting positions.",
+          "data": {
+            "name": "Name",
+            "address": "Address",
+            "device_class": "Type",
+            "up_time": "Up time",
+            "down_time": "Down time",
+            "reversed": "Reverse direction"
+          },
+          "data_description": {
+            "address": "Hex address, e.g. ABCD",
+            "up_time": "Seconds the cover needs to open completely",
+            "down_time": "Seconds the cover needs to close completely",
+            "reversed": "Swap the open and close commands"
+          }
+        },
+        "reconfigure": {
+          "title": "Change cover {address}",
+          "description": "Changing the address requires pairing the cover again.",
+          "data": {
+            "name": "Name",
+            "address": "Address",
+            "device_class": "Type",
+            "up_time": "Up time",
+            "down_time": "Down time",
+            "reversed": "Reverse direction"
+          },
+          "data_description": {
+            "address": "Hex address, e.g. ABCD",
+            "up_time": "Seconds the cover needs to open completely",
+            "down_time": "Seconds the cover needs to close completely",
+            "reversed": "Swap the open and close commands"
+          }
+        }
+      },
+      "error": {
+        "invalid_address": "The address must consist of 1 to 6 hex digits (0-9, A-F).",
+        "invalid_name": "Enter a name.",
+        "already_configured": "A cover with this address is already configured."
+      },
+      "abort": {
+        "reconfigure_successful": "The cover has been updated."
+      }
+    }
+  },
+  "selector": {
+    "cover_device_class": {
+      "options": {
+        "awning": "Awning",
+        "blind": "Blind",
+        "curtain": "Curtain",
+        "damper": "Damper",
+        "door": "Door",
+        "garage": "Garage",
+        "gate": "Gate",
+        "shade": "Shade",
+        "shutter": "Shutter",
+        "window": "Window"
+      }
+    }
+  },
+  "issues": {
+    "yaml_imported": {
+      "title": "Somfy CUL: YAML configuration imported",
+      "description": "The Somfy CUL configuration from configuration.yaml has been imported. The CUL and the covers can now be managed in the UI under Settings → Devices & services → Somfy CUL.\n\nThe YAML configuration keeps working: covers added there are imported at startup. Covers that already exist are not changed by YAML anymore, edit them in the UI instead. You can remove the `somfy_cul` and `cover` entries from configuration.yaml to get rid of this message."
+    },
+    "yaml_import_failed": {
+      "title": "Somfy CUL: YAML configuration could not be imported",
+      "description": "The Somfy CUL configuration for {cul_path} could not be imported ({reason}). Check the configuration or set up the integration in the UI."
+    }
+  },
+  "exceptions": {
+    "not_initialized": {
+      "message": "Somfy CUL is not set up or not connected."
+    }
+  },
+  "services": {
+    "prog_cover": {
+      "name": "Prog cover",
+      "description": "Sends the PROG command to pair the cover."
+    },
+    "open_cover": {
+      "name": "Open cover",
+      "description": "Opens the cover."
+    },
+    "close_cover": {
+      "name": "Close cover",
+      "description": "Closes the cover."
+    },
+    "stop_cover": {
+      "name": "Stop cover",
+      "description": "Stops the cover."
+    },
+    "reload_state": {
+      "name": "Reload state",
+      "description": "Reloads the encryption key and rolling code from somfy_cover_state.yaml."
+    },
+    "reload_platform": {
+      "name": "Reload CUL",
+      "description": "Reconnects to the CUL stick and restarts the listener."
+    },
+    "send_raw_command": {
+      "name": "Send raw command",
+      "description": "Sends a raw command to the CUL and logs the response.",
+      "fields": {
+        "command": {
+          "name": "Command",
+          "description": "Raw command without trailing newline, e.g. V"
+        },
+        "timeout": {
+          "name": "Timeout",
+          "description": "Seconds to wait for a response"
+        }
+      }
+    }
+  }
+}

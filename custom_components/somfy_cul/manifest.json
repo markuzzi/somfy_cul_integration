@@ -4,16 +4,17 @@
   "codeowners": [
     "@markuzzi"
   ],
+  "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/markuzzi/somfy_cul_integration",
   "integration_type": "hub",
   "iot_class": "assumed_state",
   "issue_tracker": "https://github.com/markuzzi/somfy_cul_integration/issues",
-  "loggers": ["somfy_cul"],
+  "loggers": [
+    "somfy_cul"
+  ],
   "requirements": [
     "pyserial==3.5"
   ],
-  "ssdp": [],
-  "version": "1.1.0",
-  "zeroconf": []
+  "version": "1.2.0"
 }

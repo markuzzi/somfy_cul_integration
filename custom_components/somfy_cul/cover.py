@@ -6,23 +6,29 @@ import logging
 import os
 import re
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import voluptuous as vol
 import yaml
 
 from homeassistant.components.cover import (
     ATTR_POSITION,
+    DOMAIN as COVER_DOMAIN,
     PLATFORM_SCHEMA as COVER_PLATFORM_SCHEMA,
     CoverDeviceClass,
     CoverEntity,
     CoverEntityFeature,
     CoverState,
 )
+from homeassistant.config_entries import ConfigSubentry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_platform
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity_platform import (
+    AddConfigEntryEntitiesCallback,
+    AddEntitiesCallback,
+)
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 from homeassistant.helpers.event import async_call_later
@@ -34,18 +40,23 @@ from .const import (
     ATTR_ROLLING_CODE,
     ATTR_UP_TIME,
     CONF_ADDRESS,
+    CONF_DEVICE_CLASS,
     CONF_NAME,
     CONF_REVERSED,
     CONF_TYPE,
-    DATA_SOMFY_CUL,
     DOMAIN,
+    MANUFACTURER,
     SERVICE_CLOSE,
     SERVICE_OPEN,
     SERVICE_PROG,
     SERVICE_RELOAD,
     SERVICE_STOP,
+    SUBENTRY_TYPE_COVER,
 )
 from .cul import Cul
+
+if TYPE_CHECKING:
+    from . import SomfyCulConfigEntry
 
 
 class Command(Enum):
@@ -126,12 +137,43 @@ PLATFORM_SCHEMA = COVER_PLATFORM_SCHEMA.extend(
     {
         vol.Required(CONF_NAME): cv.string,
         vol.Required(CONF_ADDRESS): cv.string,
-        vol.Optional(CONF_TYPE, default=CoverDeviceClass.SHUTTER): cv.string,
+        vol.Optional(CONF_TYPE): cv.string,
+        vol.Optional(CONF_DEVICE_CLASS): cv.string,
         vol.Optional(CONF_REVERSED, default=False): cv.boolean,
         vol.Optional(ATTR_UP_TIME): vol.Coerce(int),
         vol.Optional(ATTR_DOWN_TIME): vol.Coerce(int),
     }
 )
+
+
+def async_get_yaml_covers(config: ConfigType) -> list[dict[str, Any]]:
+    """Return the covers configured in YAML as subentry data."""
+    covers: list[dict[str, Any]] = []
+    for platform_config in cv.ensure_list(config.get(COVER_DOMAIN)):
+        if not isinstance(platform_config, dict):
+            continue
+        if platform_config.get("platform") != DOMAIN:
+            continue
+        try:
+            conf = PLATFORM_SCHEMA(platform_config)
+        except vol.Invalid as e:
+            _LOGGER.error("Invalid cover configuration %s: %s", platform_config, e)
+            continue
+
+        cover = {
+            CONF_NAME: conf[CONF_NAME],
+            CONF_ADDRESS: conf[CONF_ADDRESS],
+            # "shutter" is the legacy key of the device class
+            CONF_DEVICE_CLASS: conf.get(
+                CONF_DEVICE_CLASS, conf.get(CONF_TYPE, CoverDeviceClass.SHUTTER)
+            ),
+            CONF_REVERSED: conf[CONF_REVERSED],
+        }
+        for key in (ATTR_UP_TIME, ATTR_DOWN_TIME):
+            if conf.get(key) is not None:
+                cover[key] = conf[key]
+        covers.append(cover)
+    return covers
 
 
 async def async_setup_platform(
@@ -140,30 +182,38 @@ async def async_setup_platform(
     async_add_entities: AddEntitiesCallback,
     discovery_info: DiscoveryInfoType | None = None,
 ) -> None:
-    """Discover and configure Somfy covers."""
-    somfy_cul = hass.data.get(DOMAIN, {}).get(DATA_SOMFY_CUL)
+    """Set up covers from YAML.
 
-    if not somfy_cul:
-        _LOGGER.warning("SOMFY CUL device is not available")
+    The covers are imported into the config entry by the hub (see
+    __init__.py), so nothing has to be done here.
+    """
+    if not hass.config_entries.async_entries(DOMAIN):
+        _LOGGER.warning(
+            "Cover %s is not set up: add the '%s:' section to configuration.yaml "
+            "or set up the integration in the UI",
+            config.get(CONF_NAME),
+            DOMAIN,
+        )
+        return
+    _LOGGER.debug("Cover %s is set up from the config entry", config.get(CONF_NAME))
 
-    cover_config = {
-        "name": config.get(CONF_NAME),
-        "device_class": config.get(CONF_TYPE, CoverDeviceClass.SHUTTER),
-        "address": config.get(CONF_ADDRESS),
-        "up_time": config.get(ATTR_UP_TIME),
-        "down_time": config.get(ATTR_DOWN_TIME),
-        "reverse": config.get(CONF_REVERSED, False),
-    }
 
-    cover = SomfyCulShade(hass, somfy_cul, **cover_config)
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: SomfyCulConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
+) -> None:
+    """Set up the covers of a config entry."""
+    somfy_cul = entry.runtime_data.cul
 
-    _LOGGER.debug(
-        "Adding Somfy Cover: %s with address %s",
-        cover_config["name"],
-        cover_config["address"],
-    )
-
-    async_add_entities([cover])
+    for subentry in entry.subentries.values():
+        if subentry.subentry_type != SUBENTRY_TYPE_COVER:
+            continue
+        cover = SomfyCulShade(hass, somfy_cul, subentry)
+        _LOGGER.debug(
+            "Adding Somfy Cover: %s with address %s", subentry.title, cover.address
+        )
+        async_add_entities([cover], config_subentry_id=subentry.subentry_id)
 
     platform = entity_platform.async_get_current_platform()
     platform.async_register_entity_service(SERVICE_PROG, {}, "async_prog_cover")
@@ -208,32 +258,28 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         return supported_features
 
     def __init__(
-        self,
-        hass: HomeAssistant,
-        somfy_cul: Cul,
-        address: str,
-        up_time: int | None = None,
-        down_time: int | None = None,
-        name="SomfyCover",
-        reverse=False,
-        device_class=CoverDeviceClass.SHADE,
+        self, hass: HomeAssistant, somfy_cul: Cul, subentry: ConfigSubentry
     ) -> None:
         """Initialize the cover."""
         self._hass = hass
         self._somfy_cul = somfy_cul
 
-        self._attr_name = name
-        self._address = address
-        self._reverse = reverse
-        self._up_time = up_time
-        self._down_time = down_time
+        data = subentry.data
+        name: str = data[CONF_NAME]
+        self._name = name
+        self._address: str = str(data[CONF_ADDRESS]).upper()
+        self._reverse = bool(data.get(CONF_REVERSED, False))
+        self._up_time = data.get(ATTR_UP_TIME)
+        self._down_time = data.get(ATTR_DOWN_TIME)
 
         self._cancel_drv_timer = None
         self._cancel_stop_timer = None
         self._cmd_time = 0
 
-        self._attr_unique_id = address
-        self._attr_device_class = device_class
+        # the entity takes the name of its device
+        self._attr_name = None
+        self._attr_unique_id = self._address
+        self._attr_device_class = data.get(CONF_DEVICE_CLASS, CoverDeviceClass.SHUTTER)
         self._attr_is_closed = True
         self._attr_is_opening = False
         self._attr_is_closing = False
@@ -243,7 +289,19 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
             "rolling_code": self._rolling_code,
         }
 
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._address)},
+            manufacturer=MANUFACTURER,
+            model="RTS",
+            name=name,
+        )
+
         self._pending_saves: set[asyncio.Task] = set()
+
+    @property
+    def address(self) -> str:
+        """Return the RTS address of the cover."""
+        return self._address
 
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close the cover."""
@@ -484,7 +542,7 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
 
     def _write_state_pos(self, position):
         """Timer function called when shutter has been set to position."""
-        _LOGGER.debug("Write state position for device: %s", self._attr_name)
+        _LOGGER.debug("Write state position for device: %s", self._name)
         self._attr_is_opening = False
         self._attr_is_closing = False
         self._attr_is_closed = position <= 0
@@ -493,7 +551,7 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
 
     def _write_state_open(self):
         """Timer function called when shutter has been opened."""
-        _LOGGER.debug("Write state open for device: %s", self._attr_name)
+        _LOGGER.debug("Write state open for device: %s", self._name)
         self._attr_is_opening = False
         self._attr_is_closing = False
         self._attr_is_closed = False
@@ -502,7 +560,7 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
 
     def _write_state_closed(self):
         """Timer function called when shutter has been closed."""
-        _LOGGER.debug("Write state closed for device: %s", self._attr_name)
+        _LOGGER.debug("Write state closed for device: %s", self._name)
         self._attr_is_opening = False
         self._attr_is_closing = False
         self._attr_is_closed = True
@@ -511,7 +569,7 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
 
     def _write_state_stopped(self, position=0):
         """Timer function called when shutter has been closed."""
-        _LOGGER.debug("Write state stopped for device: %s", self._attr_name)
+        _LOGGER.debug("Write state stopped for device: %s", self._name)
         self._attr_is_opening = False
         self._attr_is_closing = False
         self._attr_is_closed = False
@@ -545,7 +603,7 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
 
         Returns the time after which the cover must be stoppped in case of a target position
         """
-        _LOGGER.debug("Starting a timer for device: %s", self._attr_name)
+        _LOGGER.debug("Starting a timer for device: %s", self._name)
         self._reset_timer()
         self._cmd_time = time.time()
 
@@ -743,7 +801,7 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
             "Generated string %s from command %s for device %s",
             frame,
             cmd.value,
-            self.name,
+            self._name,
         )
 
         # Verification: XOR of all Nibbles (over 7 Bytes) must be 0
