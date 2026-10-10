@@ -91,6 +91,28 @@ def _read_state_file(path: str) -> dict | None:
     return state_data
 
 
+def _parse_code(value: Any, name: str, mask: int, default: int) -> int:
+    """Parse an enc_key or rolling_code from the state file.
+
+    Integers are taken as they are. Strings are interpreted as hex values,
+    as used by FHEM (e.g. enc_key "A5", rolling_code "012C").
+    """
+    if value is None:
+        return default
+    try:
+        if isinstance(value, bool):
+            raise ValueError
+        if isinstance(value, int):
+            return value & mask
+        text = str(value).strip()
+        if text.lower().startswith("0x"):
+            text = text[2:]
+        return int(text, 16) & mask
+    except ValueError:
+        _LOGGER.error("Invalid %s %r in state file, using %s", name, value, default)
+        return default
+
+
 def _write_state_file(path: str, state_data: dict) -> None:
     """Write the state file (runs in the executor)."""
     try:
@@ -397,8 +419,12 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
 
     def _set_state(self, state):
         """Set the object's state from a dictionary."""
-        self._enc_key = state.get(ATTR_ENC_KEY, self._enc_key)
-        self._rolling_code = state.get(ATTR_ROLLING_CODE, self._rolling_code)
+        self._enc_key = _parse_code(
+            state.get(ATTR_ENC_KEY), ATTR_ENC_KEY, 0xF, self._enc_key
+        )
+        self._rolling_code = _parse_code(
+            state.get(ATTR_ROLLING_CODE), ATTR_ROLLING_CODE, 0xFFFF, self._rolling_code
+        )
         self._attr_current_cover_position = state.get(
             ATTR_CURRENT_POS, self._attr_current_cover_position
         )

@@ -51,6 +51,26 @@ ABCD:
 
 Do not delete this file and do not change the `address` of a cover: the cover only reacts to the address it was paired with and to rolling codes that are higher than the last one it received. Otherwise, you have to pair the cover again (see `somfy_cul.prog_cover`).
 
+### Migrating from FHEM or another controller
+
+To keep the pairing of your covers, take over the address, the encryption key and the rolling code of each cover:
+
+| FHEM (`10_SOMFY`) | Home Assistant |
+|-------------------|----------------|
+| `address` (e.g. `11111F`) | `address` in `configuration.yaml` |
+| `enc-key` (e.g. `A5`) | `enc_key` in `somfy_cover_state.yaml` |
+| `rolling-code` (e.g. `012C`) | `rolling_code` in `somfy_cover_state.yaml` |
+
+Numbers are read as decimal values, quoted strings as hex values. Hex values must be quoted, otherwise YAML may interpret them as decimal or octal numbers. Only the last digit of the encryption key is used. Disable the cover in FHEM before, since both controllers would use the same rolling codes.
+
+```yaml
+11111F:
+  enc_key: "A5"
+  rolling_code: "012C"
+```
+
+After a restart or `somfy_cul.reload_state`, the values are stored as decimal numbers.
+
 ### Upgrading
 
 - **From 1.0.0 to 1.0.1 or later**: addresses with less than 6 hex digits are sent padded with leading zeros since version 1.0.1 (`ABCD` is sent as `00ABCD`). Version 1.0.0 sent them unpadded, which the CUL firmware interpreted as a different address. If a cover does not react after the upgrade, pair it again using `somfy_cul.prog_cover`.
