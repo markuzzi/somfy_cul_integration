@@ -323,7 +323,21 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
             _LOGGER.debug("Argument `position` is missing in set_cover_position")
             return
 
-        await self.async_send_command(Command.POS, int(position))
+        position = int(position)
+
+        # The end positions are handled by the motor's end stops. A timed STOP
+        # must not be sent there: STOP is the MY command of RTS and a motor
+        # that has already stopped would drive to its MY position instead.
+        if position >= 100:
+            _LOGGER.debug("Position %s -> plain OPEN for %s", position, self._name)
+            await self.async_open_cover()
+            return
+        if position <= 0:
+            _LOGGER.debug("Position %s -> plain CLOSE for %s", position, self._name)
+            await self.async_close_cover()
+            return
+
+        await self.async_send_command(Command.POS, position)
 
     async def async_send_command(self, cmd: Command, target_pos=None) -> None:
         """Update the state and send a command to the CUL."""
