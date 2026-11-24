@@ -32,6 +32,7 @@ from .const import (
     CONF_CUL_PATH,
     CONF_DEBUG_RX,
     CONF_DEVICE_CLASS,
+    CONF_INVERTED,
     CONF_NAME,
     CONF_REVERSED,
     DEFAULT_BAUD_RATE,
@@ -139,6 +140,7 @@ COVER_OPTIONS_SCHEMA = {
         )
     ),
     vol.Required(CONF_REVERSED, default=False): selector.BooleanSelector(),
+    vol.Required(CONF_INVERTED, default=False): selector.BooleanSelector(),
 }
 
 COVER_SCHEMA = vol.Schema(

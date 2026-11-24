@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.0
+
+- New option **Inverse mode** for awnings and other covers that open when moving down:
+  Down opens (extends), Up closes (retracts), and 100 % means fully extended.
+  The position in the state file stays in motor terms (100 = fully up).
+- Fix: with **Reverse direction**, the state and position were tracked the wrong way round
+  (opening was shown as closing/closed), and set position moved the cover in the wrong direction.
+  Reverse direction now only swaps Up and Down in the sent frames.
+  A position stored by an earlier version may be wrong once; it is corrected by the next full open or close.
+- Up and down time are now described as the times for a complete Up/Down movement.
+
 ## 1.2.1
 
 - Fix: `set_cover_position` 0/100 sends a plain CLOSE/OPEN without a trailing STOP.

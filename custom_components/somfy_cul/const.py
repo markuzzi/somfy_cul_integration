@@ -22,6 +22,7 @@ CONF_TYPE: Final = "shutter"  # legacy YAML key for the device class
 CONF_DEVICE_CLASS: Final = "device_class"
 CONF_ADDRESS: Final = "address"
 CONF_REVERSED: Final = "reversed"
+CONF_INVERTED: Final = "inverted"
 
 ATTR_ENC_KEY: Final = "enc_key"
 ATTR_ROLLING_CODE: Final = "rolling_code"

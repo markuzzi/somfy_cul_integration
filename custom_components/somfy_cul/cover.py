@@ -41,6 +41,7 @@ from .const import (
     ATTR_UP_TIME,
     CONF_ADDRESS,
     CONF_DEVICE_CLASS,
+    CONF_INVERTED,
     CONF_NAME,
     CONF_REVERSED,
     CONF_TYPE,
@@ -60,13 +61,17 @@ if TYPE_CHECKING:
 
 
 class Command(Enum):
-    """Available SOMFY commands."""
+    """Available SOMFY commands.
+
+    UP and DOWN are motor directions. In normal mode, Up opens the cover;
+    in inverse mode, Down opens it (see SomfyCulShade._motor_command).
+    """
 
     MY = "10"
     STOP = "10"  # alias of MY
-    OPEN = "20"
+    UP = "20"
     MY_UP = "30"
-    CLOSE = "40"
+    DOWN = "40"
     MY_DOWN = "50"
     UP_DOWN = "60"
     MY_UP_DOWN = "70"
@@ -140,6 +145,7 @@ PLATFORM_SCHEMA = COVER_PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_TYPE): cv.string,
         vol.Optional(CONF_DEVICE_CLASS): cv.string,
         vol.Optional(CONF_REVERSED, default=False): cv.boolean,
+        vol.Optional(CONF_INVERTED, default=False): cv.boolean,
         vol.Optional(ATTR_UP_TIME): vol.Coerce(int),
         vol.Optional(ATTR_DOWN_TIME): vol.Coerce(int),
     }
@@ -168,6 +174,7 @@ def async_get_yaml_covers(config: ConfigType) -> list[dict[str, Any]]:
                 CONF_DEVICE_CLASS, conf.get(CONF_TYPE, CoverDeviceClass.SHUTTER)
             ),
             CONF_REVERSED: conf[CONF_REVERSED],
+            CONF_INVERTED: conf[CONF_INVERTED],
         }
         for key in (ATTR_UP_TIME, ATTR_DOWN_TIME):
             if conf.get(key) is not None:
@@ -224,7 +231,14 @@ async def async_setup_entry(
 
 
 class SomfyCulShade(RestoreEntity, CoverEntity):
-    """Object for controlling a Somfy cover."""
+    """Object for controlling a Somfy cover.
+
+    The position is tracked in motor terms: 0 is the lower end position
+    (Down), 100 the upper end position (Up). This is also the value stored
+    as current_pos in the state file. Home Assistant gets the same value in
+    normal mode and the inverted value (100 - position) in inverse mode,
+    e.g. for awnings, which are open when they are moved down (extended).
+    """
 
     _attr_should_poll = False
     _attr_assumed_state = True
@@ -269,6 +283,7 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         self._name = name
         self._address: str = str(data[CONF_ADDRESS]).upper()
         self._reverse = bool(data.get(CONF_REVERSED, False))
+        self._inverted = bool(data.get(CONF_INVERTED, False))
         self._up_time = data.get(ATTR_UP_TIME)
         self._down_time = data.get(ATTR_DOWN_TIME)
 
@@ -280,9 +295,12 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         self._attr_name = None
         self._attr_unique_id = self._address
         self._attr_device_class = data.get(CONF_DEVICE_CLASS, CoverDeviceClass.SHUTTER)
-        self._attr_is_closed = True
-        self._attr_is_opening = False
-        self._attr_is_closing = False
+        # motor position (0 = Down, 100 = Up), None while unknown
+        self._position: int | None = None
+        self._moving_up = False
+        self._moving_down = False
+        # closed state in Home Assistant terms, used while the position is unknown
+        self._restored_closed = True
 
         self._attr_extra_state_attributes = {
             "enc_key": self._enc_key,
@@ -303,15 +321,59 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         """Return the RTS address of the cover."""
         return self._address
 
+    def _to_ha_position(self, position: int | None) -> int | None:
+        """Convert between motor and Home Assistant position (both directions)."""
+        if position is None:
+            return None
+        return 100 - position if self._inverted else position
+
+    @property
+    def current_cover_position(self) -> int | None:
+        """Return the position in Home Assistant terms (100 = open)."""
+        return self._to_ha_position(self._position)
+
+    @property
+    def is_closed(self) -> bool | None:
+        """Return True if the cover is closed."""
+        if self._position is None:
+            return self._restored_closed
+        return self.current_cover_position <= 0
+
+    @property
+    def is_opening(self) -> bool:
+        """Return True if the cover is opening."""
+        return self._moving_down if self._inverted else self._moving_up
+
+    @property
+    def is_closing(self) -> bool:
+        """Return True if the cover is closing."""
+        return self._moving_up if self._inverted else self._moving_down
+
+    def _motor_command(self, open_cover: bool) -> Command:
+        """Return the motor direction (Up or Down) to open or close the cover.
+
+        Reverse direction is not applied here but when the frame is sent, so
+        that the position is always tracked in the real motor direction.
+        """
+        move_up = open_cover != self._inverted
+        return Command.UP if move_up else Command.DOWN
+
+    def _wire_command(self, cmd: Command) -> Command:
+        """Return the command to send, with Up and Down swapped if reversed."""
+        if self._reverse:
+            if cmd == Command.UP:
+                return Command.DOWN
+            if cmd == Command.DOWN:
+                return Command.UP
+        return cmd
+
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close the cover."""
-        cmd = Command.CLOSE if not self._reverse else Command.OPEN
-        await self.async_send_command(cmd)
+        await self.async_send_command(self._motor_command(open_cover=False))
 
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open the cover."""
-        cmd = Command.CLOSE if self._reverse else Command.OPEN
-        await self.async_send_command(cmd)
+        await self.async_send_command(self._motor_command(open_cover=True))
 
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop the cover."""
@@ -329,15 +391,16 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         # must not be sent there: STOP is the MY command of RTS and a motor
         # that has already stopped would drive to its MY position instead.
         if position >= 100:
-            _LOGGER.debug("Position %s -> plain OPEN for %s", position, self._name)
+            _LOGGER.debug("Position %s -> open_cover (no timed STOP) for %s", position, self._name)
             await self.async_open_cover()
             return
         if position <= 0:
-            _LOGGER.debug("Position %s -> plain CLOSE for %s", position, self._name)
+            _LOGGER.debug("Position %s -> close_cover (no timed STOP) for %s", position, self._name)
             await self.async_close_cover()
             return
 
-        await self.async_send_command(Command.POS, position)
+        # the target is given in Home Assistant terms, the motor needs its own
+        await self.async_send_command(Command.POS, self._to_ha_position(position))
 
     async def async_send_command(self, cmd: Command, target_pos=None) -> None:
         """Update the state and send a command to the CUL."""
@@ -372,7 +435,7 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
             _LOGGER.error("CUL handle missing; command %s dropped", cmd)
             return False
 
-        frame = self._command_string(cmd)
+        frame = self._command_string(self._wire_command(cmd))
         # consume the rolling code before awaiting so that concurrent
         # commands never reuse the same code
         self._increase_rolling_code()
@@ -403,7 +466,7 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
             CoverState.OPEN,
             CoverState.CLOSED,
         ):
-            self._attr_is_closed = last_state.state == CoverState.CLOSED
+            self._restored_closed = last_state.state == CoverState.CLOSED
 
         await self._load_state_from_yaml()
         # save the initial state or migrate the entry to the current format
@@ -486,7 +549,7 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         return {
             ATTR_ENC_KEY: self._enc_key,
             ATTR_ROLLING_CODE: self._rolling_code,
-            ATTR_CURRENT_POS: self._attr_current_cover_position,
+            ATTR_CURRENT_POS: self._position,
         }
 
     def _set_state(self, state):
@@ -497,11 +560,7 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         self._rolling_code = _parse_code(
             state.get(ATTR_ROLLING_CODE), ATTR_ROLLING_CODE, 0xFFFF, self._rolling_code
         )
-        self._attr_current_cover_position = state.get(
-            ATTR_CURRENT_POS, self._attr_current_cover_position
-        )
-        if self._attr_current_cover_position is not None:
-            self._attr_is_closed = self._attr_current_cover_position <= 0
+        self._position = state.get(ATTR_CURRENT_POS, self._position)
         self._attr_extra_state_attributes = {
             "enc_key": self._enc_key,
             "rolling_code": self._rolling_code,
@@ -545,10 +604,10 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
                 self._cancel_drv_timer = None
 
     def _write_state(self, cmd: Command, position=None):
-        if cmd == Command.OPEN:
-            self._write_state_open()
-        elif cmd == Command.CLOSE:
-            self._write_state_closed()
+        if cmd == Command.UP:
+            self._write_state_up()
+        elif cmd == Command.DOWN:
+            self._write_state_down()
         elif cmd == Command.POS:
             self._write_state_pos(position)
         else:
@@ -557,51 +616,47 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
     def _write_state_pos(self, position):
         """Timer function called when shutter has been set to position."""
         _LOGGER.debug("Write state position for device: %s", self._name)
-        self._attr_is_opening = False
-        self._attr_is_closing = False
-        self._attr_is_closed = position <= 0
-        self._attr_current_cover_position = position
+        self._moving_up = False
+        self._moving_down = False
+        self._position = position
         self._async_save_state()
 
-    def _write_state_open(self):
-        """Timer function called when shutter has been opened."""
-        _LOGGER.debug("Write state open for device: %s", self._name)
-        self._attr_is_opening = False
-        self._attr_is_closing = False
-        self._attr_is_closed = False
-        self._attr_current_cover_position = 100
+    def _write_state_up(self):
+        """Timer function called when the cover has reached the upper end position."""
+        _LOGGER.debug("Write state up for device: %s", self._name)
+        self._moving_up = False
+        self._moving_down = False
+        self._position = 100
         self._async_save_state()
 
-    def _write_state_closed(self):
-        """Timer function called when shutter has been closed."""
-        _LOGGER.debug("Write state closed for device: %s", self._name)
-        self._attr_is_opening = False
-        self._attr_is_closing = False
-        self._attr_is_closed = True
-        self._attr_current_cover_position = 0
+    def _write_state_down(self):
+        """Timer function called when the cover has reached the lower end position."""
+        _LOGGER.debug("Write state down for device: %s", self._name)
+        self._moving_up = False
+        self._moving_down = False
+        self._position = 0
         self._async_save_state()
 
     def _write_state_stopped(self, position=0):
-        """Timer function called when shutter has been closed."""
+        """Write the state after the cover has been stopped."""
         _LOGGER.debug("Write state stopped for device: %s", self._name)
-        self._attr_is_opening = False
-        self._attr_is_closing = False
-        self._attr_is_closed = False
-        self._attr_current_cover_position = position
+        self._moving_up = False
+        self._moving_down = False
+        self._position = position
         self._async_save_state()
 
     def _calculate_position_command(
         self, target_position: int | None = None
     ) -> tuple[Command, float]:
-        cur = self._attr_current_cover_position or 0
+        cur = self._position or 0
         target = 100 if target_position is None else target_position
 
         if target > cur:
-            cmd = Command.OPEN
+            cmd = Command.UP
             time_per_step = self._up_time / 100
             time_to_stop = time_per_step * (target - cur)
         elif target < cur:
-            cmd = Command.CLOSE
+            cmd = Command.DOWN
             time_per_step = self._down_time / 100
             time_to_stop = time_per_step * (cur - target)
         else:
@@ -630,8 +685,8 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
                 _LOGGER.debug("Position cannot be set")
                 return None, None
 
-            self._attr_is_opening = cmd == Command.OPEN
-            self._attr_is_closing = cmd == Command.CLOSE
+            self._moving_up = cmd == Command.UP
+            self._moving_down = cmd == Command.DOWN
             self.async_write_ha_state()
 
             async def _handle_timer(_now):
@@ -641,41 +696,41 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
 
             _LOGGER.debug("POS timer with timeout: %s", time_to_stop)
 
-        elif cmd == Command.OPEN:
-            self._attr_is_opening = True
-            self._attr_is_closing = False
+        elif cmd == Command.UP:
+            self._moving_up = True
+            self._moving_down = False
             self._async_save_state()
 
             timeout = self._up_time
-            if self._attr_current_cover_position is not None:
-                cur = self._attr_current_cover_position / 100
+            if self._position is not None:
+                cur = self._position / 100
                 timeout = timeout * (1 - cur) + 1
 
             async def _cb(_now):
-                self._write_state_open()
+                self._write_state_up()
             self._cancel_drv_timer = async_call_later(self.hass, timeout, _cb)
-            # self._cancel_drv_timer = Timer(timeout, self._write_state_open)
-            _LOGGER.debug("OPEN timer with timeout: %s", timeout)
+            # self._cancel_drv_timer = Timer(timeout, self._write_state_up)
+            _LOGGER.debug("UP timer with timeout: %s", timeout)
 
-        elif cmd == Command.CLOSE:
-            self._attr_is_opening = False
-            self._attr_is_closing = True
+        elif cmd == Command.DOWN:
+            self._moving_up = False
+            self._moving_down = True
             self._async_save_state()
 
             timeout = self._down_time
-            if self._attr_current_cover_position is not None:
-                cur = self._attr_current_cover_position / 100
+            if self._position is not None:
+                cur = self._position / 100
                 timeout = timeout * (cur) + 1
 
             async def _cb(_now):
-                self._write_state_closed()
+                self._write_state_down()
             self._cancel_drv_timer = async_call_later(self.hass, timeout, _cb)
-            # self._cancel_drv_timer = Timer(timeout, self._write_state_closed)
-            _LOGGER.debug("CLOSE timer with timeout: %s", timeout)
+            # self._cancel_drv_timer = Timer(timeout, self._write_state_down)
+            _LOGGER.debug("DOWN timer with timeout: %s", timeout)
 
         else:
             _LOGGER.warning(
-                "Timer can only be started for commands OPEN, CLOSE, and POS, but not for %s",
+                "Timer can only be started for commands UP, DOWN, and POS, but not for %s",
                 cmd,
             )
             return None, None
@@ -691,9 +746,9 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         """
         _LOGGER.debug("Updating state for command: %s", cmd)
         _move_time = None
-        if cmd == Command.OPEN:
+        if cmd == Command.UP:
             _move_time = self._up_time
-        elif cmd == Command.CLOSE:
+        elif cmd == Command.DOWN:
             _move_time = self._down_time
         elif cmd == Command.POS:
             _move_time = min(self._up_time or 0, self._down_time or 0)
@@ -702,7 +757,7 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
 
         time_to_stop = None
 
-        if cmd in (Command.OPEN, Command.CLOSE, Command.POS):
+        if cmd in (Command.UP, Command.DOWN, Command.POS):
             if _move_time and _move_time > 0:
                 cmd, time_to_stop = self._start_update_state_timer(cmd, target_position)
             else:
@@ -715,20 +770,20 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         elif cmd == Command.STOP:
             current_pos = (
                 50
-                if self._attr_current_cover_position is None
-                else self._attr_current_cover_position
+                if self._position is None
+                else self._position
             )
             current_time = time.time()
 
             if self._cancel_drv_timer is not None and (
-                self._attr_is_closing or self._attr_is_opening
+                self._moving_down or self._moving_up
             ):
                 self._reset_timer()
                 if self._cmd_time > 0:
                     ti = current_time - self._cmd_time
-                    dt = self._up_time if self._attr_is_opening else self._down_time
+                    dt = self._up_time if self._moving_up else self._down_time
                     current_pos += round(ti / dt * 100) * (
-                        1 if self._attr_is_opening else -1
+                        1 if self._moving_up else -1
                     )
 
             # Make sure that pos is in range 0..100

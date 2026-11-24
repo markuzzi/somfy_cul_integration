@@ -63,15 +63,17 @@
             "name": "Name",
             "address": "Adresse",
             "device_class": "Typ",
-            "up_time": "Öffnungszeit",
-            "down_time": "Schließzeit",
-            "reversed": "Richtung umkehren"
+            "up_time": "Fahrzeit auf",
+            "down_time": "Fahrzeit ab",
+            "reversed": "Richtung umkehren",
+            "inverted": "Invertierter Modus"
           },
           "data_description": {
             "address": "Hex-Adresse, z. B. ABCD",
-            "up_time": "Sekunden, die der Rollladen zum vollständigen Öffnen braucht",
-            "down_time": "Sekunden, die der Rollladen zum vollständigen Schließen braucht",
-            "reversed": "Befehle zum Öffnen und Schließen vertauschen"
+            "up_time": "Sekunden für eine vollständige Fahrt nach oben",
+            "down_time": "Sekunden für eine vollständige Fahrt nach unten",
+            "reversed": "Befehle Auf und Ab vertauschen, z. B. wenn der Motor in die falsche Richtung fährt",
+            "inverted": "Für Markisen und andere Behänge, die beim Herunterfahren öffnen: Ab öffnet (fährt aus), Auf schließt (fährt ein), 100 % bedeutet vollständig ausgefahren"
           }
         },
         "reconfigure": {
@@ -81,15 +83,17 @@
             "name": "Name",
             "address": "Adresse",
             "device_class": "Typ",
-            "up_time": "Öffnungszeit",
-            "down_time": "Schließzeit",
-            "reversed": "Richtung umkehren"
+            "up_time": "Fahrzeit auf",
+            "down_time": "Fahrzeit ab",
+            "reversed": "Richtung umkehren",
+            "inverted": "Invertierter Modus"
           },
           "data_description": {
             "address": "Hex-Adresse, z. B. ABCD",
-            "up_time": "Sekunden, die der Rollladen zum vollständigen Öffnen braucht",
-            "down_time": "Sekunden, die der Rollladen zum vollständigen Schließen braucht",
-            "reversed": "Befehle zum Öffnen und Schließen vertauschen"
+            "up_time": "Sekunden für eine vollständige Fahrt nach oben",
+            "down_time": "Sekunden für eine vollständige Fahrt nach unten",
+            "reversed": "Befehle Auf und Ab vertauschen, z. B. wenn der Motor in die falsche Richtung fährt",
+            "inverted": "Für Markisen und andere Behänge, die beim Herunterfahren öffnen: Ab öffnet (fährt aus), Auf schließt (fährt ein), 100 % bedeutet vollständig ausgefahren"
           }
         }
       },

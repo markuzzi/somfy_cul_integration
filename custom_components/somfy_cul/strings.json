@@ -65,13 +65,15 @@
             "device_class": "Type",
             "up_time": "Up time",
             "down_time": "Down time",
-            "reversed": "Reverse direction"
+            "reversed": "Reverse direction",
+            "inverted": "Inverse mode"
           },
           "data_description": {
             "address": "Hex address, e.g. ABCD",
-            "up_time": "Seconds the cover needs to open completely",
-            "down_time": "Seconds the cover needs to close completely",
-            "reversed": "Swap the open and close commands"
+            "up_time": "Seconds for a complete Up movement",
+            "down_time": "Seconds for a complete Down movement",
+            "reversed": "Swap the Up and Down commands, e.g. if the motor runs in the wrong direction",
+            "inverted": "For awnings and other covers that open when moving down: Down opens (extends) the cover, Up closes (retracts) it, and 100 % means fully extended"
           }
         },
         "reconfigure": {
@@ -83,13 +85,15 @@
             "device_class": "Type",
             "up_time": "Up time",
             "down_time": "Down time",
-            "reversed": "Reverse direction"
+            "reversed": "Reverse direction",
+            "inverted": "Inverse mode"
           },
           "data_description": {
             "address": "Hex address, e.g. ABCD",
-            "up_time": "Seconds the cover needs to open completely",
-            "down_time": "Seconds the cover needs to close completely",
-            "reversed": "Swap the open and close commands"
+            "up_time": "Seconds for a complete Up movement",
+            "down_time": "Seconds for a complete Down movement",
+            "reversed": "Swap the Up and Down commands, e.g. if the motor runs in the wrong direction",
+            "inverted": "For awnings and other covers that open when moving down: Down opens (extends) the cover, Up closes (retracts) it, and 100 % means fully extended"
           }
         }
       },

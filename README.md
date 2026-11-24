@@ -28,6 +28,21 @@ The integration is configured in the UI. The YAML configuration of earlier versi
 
 The **address** is the RTS channel the cover is paired with (1 to 6 hex digits, e.g. `ABCD`). For a new cover, choose any unused address and pair the cover afterwards with the `somfy_cul.prog_cover` action (see below). The **up and down time** in seconds are needed for setting positions; without them, the cover can only be opened, closed and stopped.
 
+#### Inverse mode (awnings)
+
+Home Assistant treats a position of 100 % as open and 0 % as closed. A shutter is open when it is moved up, but an awning is open when it is moved down (extended). Enable **Inverse mode** for awnings and similar covers:
+
+| | Normal mode (shutter) | Inverse mode (awning) |
+|---|---|---|
+| Open | Up | Down (extend) |
+| Close | Down | Up (retract) |
+| 100 % | fully up | fully down (extended) |
+| 0 % | fully down | fully up (retracted) |
+
+The **up time** and **down time** always refer to the motor direction: for an awning in inverse mode, the down time is the time needed to extend it completely. The position in the state file (`current_pos`) is also stored in motor terms (100 = fully up), so it stays valid when inverse mode is switched on or off.
+
+**Reverse direction** is a different option: it only swaps the Up and Down commands sent to the motor, e.g. if the motor was installed or programmed the other way round. Position and state are not affected, and the up and down times still refer to the real movement. Use inverse mode, not reverse direction, to get correct positions for an awning.
+
 Each cover can be changed later via its **Reconfigure** menu entry; the entry is reloaded automatically. Changing the address requires pairing the cover again. The **Configure** button of the entry contains the option to log received frames.
 
 ### YAML configuration
@@ -48,6 +63,7 @@ cover:
     down_time: 13
     device_class: shutter  # optional; "shutter:" is accepted as legacy key
     reversed: false        # optional
+    inverted: false        # optional, inverse mode for awnings
 ```
 
 ### State file
