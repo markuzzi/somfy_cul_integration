@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import glob
 import logging
 import re
+import time
 from types import MappingProxyType
 from typing import Any
 
@@ -23,6 +25,7 @@ from homeassistant.config_entries import (
 )
 from homeassistant.core import callback
 from homeassistant.helpers import selector
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .const import (
     ATTR_DOWN_TIME,
@@ -34,18 +37,26 @@ from .const import (
     CONF_DEVICE_CLASS,
     CONF_INVERTED,
     CONF_NAME,
+    CONF_REMOTES,
     CONF_REVERSED,
     DEFAULT_BAUD_RATE,
     DEFAULT_CUL_PATH,
     DOMAIN,
+    SIGNAL_SOMFY_CUL_REMOTE,
     SUBENTRY_TYPE_COVER,
 )
 from .cul import Cul
+from .rts import RtsFrame
 
 _LOGGER = logging.getLogger(__name__)
 
 ADDRESS_PATTERN = re.compile(r"[0-9A-F]{1,6}")
 BAUD_RATES = [9600, 19200, 38400, 57600, 115200]
+
+# form field that starts the search for a remote; it is not stored
+CONF_SEARCH_REMOTE = "search_remote"
+# seconds to wait for a button press when searching for a remote
+SEARCH_REMOTE_TIMEOUT = 30
 
 
 def _list_serial_ports() -> list[str]:
@@ -143,16 +154,38 @@ COVER_OPTIONS_SCHEMA = {
     vol.Required(CONF_INVERTED, default=False): selector.BooleanSelector(),
 }
 
-COVER_SCHEMA = vol.Schema(
-    {vol.Required(CONF_ADDRESS): selector.TextSelector(), **COVER_OPTIONS_SCHEMA}
-)
+
+def _cover_schema(remote_options: list[selector.SelectOptionDict]) -> vol.Schema:
+    """Return the cover schema, offering the received remotes."""
+    return vol.Schema(
+        {
+            vol.Required(CONF_ADDRESS): selector.TextSelector(),
+            **COVER_OPTIONS_SCHEMA,
+            vol.Optional(CONF_REMOTES, default=[]): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=remote_options,
+                    multiple=True,
+                    custom_value=True,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Optional(CONF_SEARCH_REMOTE, default=False): selector.BooleanSelector(),
+        }
+    )
 
 
 def _clean_cover_data(user_input: dict[str, Any]) -> dict[str, Any]:
     """Normalize the cover data entered by the user."""
     data = dict(user_input)
+    data.pop(CONF_SEARCH_REMOTE, None)
     data[CONF_ADDRESS] = normalize_address(data[CONF_ADDRESS])
     data[CONF_NAME] = str(data[CONF_NAME]).strip()
+    remotes: list[str] = []
+    for remote in data.get(CONF_REMOTES) or []:
+        remote = normalize_address(remote).zfill(6)
+        if remote not in remotes:
+            remotes.append(remote)
+    data[CONF_REMOTES] = remotes
     for key in (ATTR_UP_TIME, ATTR_DOWN_TIME):
         if data.get(key) is None:
             data.pop(key, None)
@@ -330,14 +363,39 @@ class SomfyCulOptionsFlowHandler(OptionsFlow):
 class CoverSubentryFlowHandler(ConfigSubentryFlow):
     """Handle adding and reconfiguring a cover."""
 
+    def _schema(self, selected: list[str] | None = None) -> vol.Schema:
+        """Return the cover schema with the remotes received recently."""
+        options: list[selector.SelectOptionDict] = []
+        data = getattr(self._get_entry(), "runtime_data", None)
+        now = time.monotonic()
+        for address, (seen, frame) in sorted(
+            getattr(data, "remotes", {}).items(), key=lambda item: -item[1][0]
+        ):
+            minutes = int((now - seen) // 60)
+            options.append(
+                selector.SelectOptionDict(
+                    value=address,
+                    label=f"{address} ({frame.command}, {minutes} min ago)",
+                )
+            )
+        known = {option["value"] for option in options}
+        for address in selected or []:
+            if address not in known:
+                options.append(selector.SelectOptionDict(value=address, label=address))
+        return _cover_schema(options)
+
     def _validate(
         self, user_input: dict[str, Any], current: ConfigSubentry | None = None
     ) -> tuple[dict[str, Any] | None, dict[str, str]]:
         """Validate the cover data. Return the cleaned data and the errors."""
         try:
-            data = _clean_cover_data(user_input)
+            normalize_address(user_input[CONF_ADDRESS])
         except ValueError:
             return None, {CONF_ADDRESS: "invalid_address"}
+        try:
+            data = _clean_cover_data(user_input)
+        except ValueError:
+            return None, {CONF_REMOTES: "invalid_remote"}
 
         if not data[CONF_NAME]:
             return None, {CONF_NAME: "invalid_name"}
@@ -351,12 +409,38 @@ class CoverSubentryFlowHandler(ConfigSubentryFlow):
 
         return data, {}
 
+    _search_task: asyncio.Task[str | None] | None = None
+    _search_step: str = "user"
+    _search_values: dict[str, Any] | None = None
+
+    def _show_cover_form(
+        self, step_id: str, values: dict[str, Any] | None, errors: dict[str, str]
+    ) -> SubentryFlowResult:
+        """Show the form to add (user) or change (reconfigure) a cover."""
+        values = dict(values or {})
+        values.pop(CONF_SEARCH_REMOTE, None)
+        placeholders = None
+        if step_id == "reconfigure":
+            placeholders = {
+                CONF_ADDRESS: self._get_reconfigure_subentry().data[CONF_ADDRESS]
+            }
+        return self.async_show_form(
+            step_id=step_id,
+            data_schema=self.add_suggested_values_to_schema(
+                self._schema(values.get(CONF_REMOTES)), values
+            ),
+            errors=errors,
+            description_placeholders=placeholders,
+        )
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> SubentryFlowResult:
         """Add a cover."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            if user_input.get(CONF_SEARCH_REMOTE):
+                return await self._async_start_search("user", user_input)
             data, errors = self._validate(user_input)
             if data is not None:
                 return self.async_create_entry(
@@ -365,11 +449,7 @@ class CoverSubentryFlowHandler(ConfigSubentryFlow):
                     unique_id=cover_unique_id(data[CONF_ADDRESS]),
                 )
 
-        return self.async_show_form(
-            step_id="user",
-            data_schema=self.add_suggested_values_to_schema(COVER_SCHEMA, user_input),
-            errors=errors,
-        )
+        return self._show_cover_form("user", user_input, errors)
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
@@ -378,6 +458,8 @@ class CoverSubentryFlowHandler(ConfigSubentryFlow):
         subentry = self._get_reconfigure_subentry()
         errors: dict[str, str] = {}
         if user_input is not None:
+            if user_input.get(CONF_SEARCH_REMOTE):
+                return await self._async_start_search("reconfigure", user_input)
             data, errors = self._validate(user_input, subentry)
             if data is not None:
                 return self.async_update_and_abort(
@@ -388,12 +470,77 @@ class CoverSubentryFlowHandler(ConfigSubentryFlow):
                     unique_id=cover_unique_id(data[CONF_ADDRESS]),
                 )
 
-        return self.async_show_form(
-            step_id="reconfigure",
-            data_schema=self.add_suggested_values_to_schema(
-                COVER_SCHEMA, user_input or dict(subentry.data)
-            ),
-            errors=errors,
-            description_placeholders={CONF_ADDRESS: subentry.data[CONF_ADDRESS]},
+        return self._show_cover_form(
+            "reconfigure", user_input or dict(subentry.data), errors
         )
 
+    async def _async_start_search(
+        self, step_id: str, values: dict[str, Any]
+    ) -> SubentryFlowResult:
+        """Remember the form values and wait for a remote."""
+        if getattr(self._get_entry(), "runtime_data", None) is None:
+            # the CUL is not connected, nothing can be received
+            return self._show_cover_form(step_id, values, {"base": "not_loaded"})
+        self._search_step = step_id
+        self._search_values = dict(values)
+        return await self.async_step_search_remote()
+
+    async def _async_wait_for_remote(self) -> str | None:
+        """Return the address of the next remote received, None on timeout."""
+        found: asyncio.Future[str] = self.hass.loop.create_future()
+
+        @callback
+        def _on_remote(frame: RtsFrame) -> None:
+            if not found.done():
+                found.set_result(frame.address)
+
+        unsub = async_dispatcher_connect(self.hass, SIGNAL_SOMFY_CUL_REMOTE, _on_remote)
+        try:
+            async with asyncio.timeout(SEARCH_REMOTE_TIMEOUT):
+                return await found
+        except TimeoutError:
+            return None
+        finally:
+            unsub()
+
+    async def async_step_search_remote(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Wait until a button of a remote is pressed."""
+        if self._search_task is None:
+            self._search_task = self.hass.async_create_task(
+                self._async_wait_for_remote()
+            )
+        if not self._search_task.done():
+            return self.async_show_progress(
+                step_id="search_remote",
+                progress_action="search_remote",
+                progress_task=self._search_task,
+                description_placeholders={"timeout": str(SEARCH_REMOTE_TIMEOUT)},
+            )
+        return self.async_show_progress_done(next_step_id="search_done")
+
+    async def async_step_search_done(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Return to the form, with the remote found selected."""
+        task, self._search_task = self._search_task, None
+        address = task.result() if task is not None else None
+        values = self._search_values or {}
+        self._search_values = None
+
+        errors: dict[str, str] = {}
+        if address is None:
+            errors["base"] = "no_remote_found"
+        else:
+            remotes = list(values.get(CONF_REMOTES) or [])
+            if address not in remotes:
+                remotes.append(address)
+            values[CONF_REMOTES] = remotes
+        return self._show_cover_form(self._search_step, values, errors)
+
+    @callback
+    def async_remove(self) -> None:
+        """Stop a running search when the dialog is closed."""
+        if self._search_task is not None and not self._search_task.done():
+            self._search_task.cancel()

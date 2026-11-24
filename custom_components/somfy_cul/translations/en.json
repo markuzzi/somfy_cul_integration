@@ -66,14 +66,18 @@
             "up_time": "Up time",
             "down_time": "Down time",
             "reversed": "Reverse direction",
-            "inverted": "Inverse mode"
+            "inverted": "Inverse mode",
+            "remotes": "Remotes",
+            "search_remote": "Search for a remote"
           },
           "data_description": {
             "address": "Hex address, e.g. ABCD",
             "up_time": "Seconds for a complete Up movement",
             "down_time": "Seconds for a complete Down movement",
             "reversed": "Swap the Up and Down commands, e.g. if the motor runs in the wrong direction",
-            "inverted": "For awnings and other covers that open when moving down: Down opens (extends) the cover, Up closes (retracts) it, and 100 % means fully extended"
+            "inverted": "For awnings and other covers that open when moving down: Down opens (extends) the cover, Up closes (retracts) it, and 100 % means fully extended",
+            "remotes": "Addresses of remotes and sensors paired with the same motor. Their commands update the state of the cover. Use \"Search for a remote\" to add one by pressing a button, or select a remote received recently (requires a-culfw with Somfy RTS reception).",
+            "search_remote": "Check and submit to search: the form is saved and Home Assistant waits for a button press on the remote."
           }
         },
         "reconfigure": {
@@ -86,24 +90,34 @@
             "up_time": "Up time",
             "down_time": "Down time",
             "reversed": "Reverse direction",
-            "inverted": "Inverse mode"
+            "inverted": "Inverse mode",
+            "remotes": "Remotes",
+            "search_remote": "Search for a remote"
           },
           "data_description": {
             "address": "Hex address, e.g. ABCD",
             "up_time": "Seconds for a complete Up movement",
             "down_time": "Seconds for a complete Down movement",
             "reversed": "Swap the Up and Down commands, e.g. if the motor runs in the wrong direction",
-            "inverted": "For awnings and other covers that open when moving down: Down opens (extends) the cover, Up closes (retracts) it, and 100 % means fully extended"
+            "inverted": "For awnings and other covers that open when moving down: Down opens (extends) the cover, Up closes (retracts) it, and 100 % means fully extended",
+            "remotes": "Addresses of remotes and sensors paired with the same motor. Their commands update the state of the cover. Use \"Search for a remote\" to add one by pressing a button, or select a remote received recently (requires a-culfw with Somfy RTS reception).",
+            "search_remote": "Check and submit to search: the form is saved and Home Assistant waits for a button press on the remote."
           }
         }
       },
       "error": {
         "invalid_address": "The address must consist of 1 to 6 hex digits (0-9, A-F).",
         "invalid_name": "Enter a name.",
-        "already_configured": "A cover with this address is already configured."
+        "already_configured": "A cover with this address is already configured.",
+        "invalid_remote": "Each remote address must consist of 1 to 6 hex digits (0-9, A-F).",
+        "no_remote_found": "No remote was received. Check that the remote is in range and that the CUL firmware supports Somfy RTS reception.",
+        "not_loaded": "The CUL is not connected, so no remote can be received."
       },
       "abort": {
         "reconfigure_successful": "The cover has been updated."
+      },
+      "progress": {
+        "search_remote": "Press a button on the remote or sensor now. Waiting up to {timeout} seconds…"
       }
     }
   },

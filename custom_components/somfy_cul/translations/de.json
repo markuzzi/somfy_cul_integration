@@ -66,14 +66,18 @@
             "up_time": "Fahrzeit auf",
             "down_time": "Fahrzeit ab",
             "reversed": "Richtung umkehren",
-            "inverted": "Invertierter Modus"
+            "inverted": "Invertierter Modus",
+            "remotes": "Fernbedienungen",
+            "search_remote": "Fernbedienung suchen"
           },
           "data_description": {
             "address": "Hex-Adresse, z. B. ABCD",
             "up_time": "Sekunden für eine vollständige Fahrt nach oben",
             "down_time": "Sekunden für eine vollständige Fahrt nach unten",
             "reversed": "Befehle Auf und Ab vertauschen, z. B. wenn der Motor in die falsche Richtung fährt",
-            "inverted": "Für Markisen und andere Behänge, die beim Herunterfahren öffnen: Ab öffnet (fährt aus), Auf schließt (fährt ein), 100 % bedeutet vollständig ausgefahren"
+            "inverted": "Für Markisen und andere Behänge, die beim Herunterfahren öffnen: Ab öffnet (fährt aus), Auf schließt (fährt ein), 100 % bedeutet vollständig ausgefahren",
+            "remotes": "Adressen von Fernbedienungen und Sensoren, die mit demselben Motor gekoppelt sind. Ihre Befehle aktualisieren den Zustand des Rollladens. Mit \"Fernbedienung suchen\" per Tastendruck hinzufügen oder eine kürzlich empfangene Fernbedienung auswählen (benötigt a-culfw mit Somfy-RTS-Empfang).",
+            "search_remote": "Ankreuzen und absenden, um zu suchen: Das Formular bleibt erhalten und Home Assistant wartet auf einen Tastendruck an der Fernbedienung."
           }
         },
         "reconfigure": {
@@ -86,24 +90,34 @@
             "up_time": "Fahrzeit auf",
             "down_time": "Fahrzeit ab",
             "reversed": "Richtung umkehren",
-            "inverted": "Invertierter Modus"
+            "inverted": "Invertierter Modus",
+            "remotes": "Fernbedienungen",
+            "search_remote": "Fernbedienung suchen"
           },
           "data_description": {
             "address": "Hex-Adresse, z. B. ABCD",
             "up_time": "Sekunden für eine vollständige Fahrt nach oben",
             "down_time": "Sekunden für eine vollständige Fahrt nach unten",
             "reversed": "Befehle Auf und Ab vertauschen, z. B. wenn der Motor in die falsche Richtung fährt",
-            "inverted": "Für Markisen und andere Behänge, die beim Herunterfahren öffnen: Ab öffnet (fährt aus), Auf schließt (fährt ein), 100 % bedeutet vollständig ausgefahren"
+            "inverted": "Für Markisen und andere Behänge, die beim Herunterfahren öffnen: Ab öffnet (fährt aus), Auf schließt (fährt ein), 100 % bedeutet vollständig ausgefahren",
+            "remotes": "Adressen von Fernbedienungen und Sensoren, die mit demselben Motor gekoppelt sind. Ihre Befehle aktualisieren den Zustand des Rollladens. Mit \"Fernbedienung suchen\" per Tastendruck hinzufügen oder eine kürzlich empfangene Fernbedienung auswählen (benötigt a-culfw mit Somfy-RTS-Empfang).",
+            "search_remote": "Ankreuzen und absenden, um zu suchen: Das Formular bleibt erhalten und Home Assistant wartet auf einen Tastendruck an der Fernbedienung."
           }
         }
       },
       "error": {
         "invalid_address": "Die Adresse muss aus 1 bis 6 Hex-Ziffern bestehen (0-9, A-F).",
         "invalid_name": "Gib einen Namen ein.",
-        "already_configured": "Ein Rollladen mit dieser Adresse ist bereits eingerichtet."
+        "already_configured": "Ein Rollladen mit dieser Adresse ist bereits eingerichtet.",
+        "invalid_remote": "Jede Fernbedienungsadresse muss aus 1 bis 6 Hex-Ziffern bestehen (0-9, A-F).",
+        "no_remote_found": "Es wurde keine Fernbedienung empfangen. Prüfe, ob die Fernbedienung in Reichweite ist und die CUL-Firmware den Somfy-RTS-Empfang unterstützt.",
+        "not_loaded": "Der CUL ist nicht verbunden, daher kann keine Fernbedienung empfangen werden."
       },
       "abort": {
         "reconfigure_successful": "Der Rollladen wurde aktualisiert."
+      },
+      "progress": {
+        "search_remote": "Drücke jetzt eine Taste der Fernbedienung oder des Sensors. Es wird bis zu {timeout} Sekunden gewartet …"
       }
     }
   },

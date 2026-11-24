@@ -43,6 +43,24 @@ The **up time** and **down time** always refer to the motor direction: for an aw
 
 **Reverse direction** is a different option: it only swaps the Up and Down commands sent to the motor, e.g. if the motor was installed or programmed the other way round. Position and state are not affected, and the up and down times still refer to the real movement. Use inverse mode, not reverse direction, to get correct positions for an awning.
 
+#### Remotes and sensors
+
+With a CUL that can receive Somfy RTS frames, the integration notices the commands of Somfy remotes and sensors (e.g. Telis, Situo RTS, wind or sun sensors). This needs a 433 MHz CUL with an a-culfw firmware supporting Somfy RTS reception (a-culfw 1.26.09 with command `Ye`; not available on the CUL V4 and in 868 MHz firmware). Prebuilt firmware for all devices: [a-culfw-1.26.09-firmware.zip](https://github.com/meiser79/a-culfw/raw/somfy-rts-rx/a-culfw-1.26.09-firmware.zip) (source: branch [`somfy-rts-rx`](https://github.com/meiser79/a-culfw/tree/somfy-rts-rx) of the a-culfw fork; tested on a miniCUL 433 MHz). The integration enables the reception when it connects; firmware without reception ignores this.
+
+- **Event**: every received command fires the event `somfy_cul_remote`, e.g. for automations triggered by a remote:
+
+  ```yaml
+  triggers:
+    - trigger: event
+      event_type: somfy_cul_remote
+      event_data:
+        address: "36A433"
+        command: up
+  ```
+
+  The event data contains `address`, `command` (`my`, `up`, `down`, `my_up`, `my_down`, `up_down`, `my_up_down`, `prog`, `sun_flag`, `flag`), `command_code`, `rolling_code` and `rssi` (dBm, if the CUL reports it, e.g. after `X25`). A remote repeats its frame while the button is pressed; the repeats do not fire further events.
+- **Linked remotes**: add the addresses of the remotes and sensors that are paired with the same motor to the **Remotes** of the cover. Their Up, Down and My (stop) commands then update the state and position of the cover, as if the command had been sent by Home Assistant. To add a remote, check **Search for a remote** in the cover dialog and submit it, then press a button on the remote within 30 seconds: the dialog returns with the remote selected and keeps your other entries. Remotes received recently are also offered in the list, e.g. press a button of the remote, then open the cover's **Reconfigure** dialog. My while the cover is not moving drives the motor to its favourite position, which the integration does not know; the position is then not changed.
+
 Each cover can be changed later via its **Reconfigure** menu entry; the entry is reloaded automatically. Changing the address requires pairing the cover again. The **Configure** button of the entry contains the option to log received frames.
 
 ### YAML configuration
@@ -64,6 +82,8 @@ cover:
     device_class: shutter  # optional; "shutter:" is accepted as legacy key
     reversed: false        # optional
     inverted: false        # optional, inverse mode for awnings
+    remotes:               # optional, linked remotes and sensors
+      - "36A433"
 ```
 
 ### State file
@@ -129,7 +149,7 @@ target:
 
 ## Limitations
 
-- **Position tracking**: Somfy RTS covers do not report their position. The integration calculates the position from `up_time` and `down_time`. Commands from other remotes or sensors (e.g. a wind sensor) are not noticed, since culfw cannot receive Somfy RTS frames. Thus, linking remotes and sensors is not supported. If you need this, use a receiver supporting Somfy RTS reception, e.g. [ESPSomfy-RTS](https://github.com/rstrouse/ESPSomfy-RTS) or an RFXtrx.
+- **Position tracking**: Somfy RTS covers do not report their position. The integration calculates the position from `up_time` and `down_time`. Commands from other remotes or sensors (e.g. a wind sensor) are only noticed with a CUL firmware supporting Somfy RTS reception and if the remote is linked to the cover (see [Remotes and sensors](#remotes-and-sensors)). Commands that are not received, e.g. out of range, are missed.
 
 # Contributing To The Project
 

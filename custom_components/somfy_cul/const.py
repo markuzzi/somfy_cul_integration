@@ -23,6 +23,8 @@ CONF_DEVICE_CLASS: Final = "device_class"
 CONF_ADDRESS: Final = "address"
 CONF_REVERSED: Final = "reversed"
 CONF_INVERTED: Final = "inverted"
+# addresses of remotes and sensors that control the same motor
+CONF_REMOTES: Final = "remotes"
 
 ATTR_ENC_KEY: Final = "enc_key"
 ATTR_ROLLING_CODE: Final = "rolling_code"
@@ -41,3 +43,7 @@ SERVICE_RELOAD_PLATFORM = "reload_platform"
 SERVICE_SEND_RAW_COMMAND = "send_raw_command"
 
 SIGNAL_SOMFY_CUL_FRAME = "somfy_cul_frame"
+# a frame of a remote or sensor was received (argument: RtsFrame)
+SIGNAL_SOMFY_CUL_REMOTE = "somfy_cul_remote"
+# event fired for every received command of a remote or sensor
+EVENT_SOMFY_CUL_REMOTE: Final = "somfy_cul_remote"

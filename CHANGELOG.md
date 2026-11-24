@@ -2,6 +2,12 @@
 
 ## 1.3.0
 
+- Reception of Somfy RTS remotes and sensors, with an a-culfw firmware supporting it (a-culfw 1.26.09, command `Ye`):
+  - every received command fires the event `somfy_cul_remote` (address, command, rolling code, RSSI)
+  - new cover option **Remotes**: commands of linked remotes and sensors update the state and position of the cover.
+    Recently received remotes are offered in the cover dialog, and **Search for a remote** waits for a button press
+    and selects the remote.
+- The reception is enabled (`Ye1`) when the integration connects to the CUL.
 - New option **Inverse mode** for awnings and other covers that open when moving down:
   Down opens (extends), Up closes (retracts), and 100 % means fully extended.
   The position in the state file stays in motor terms (100 = fully up).

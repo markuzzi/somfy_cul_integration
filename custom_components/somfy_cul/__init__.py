@@ -17,11 +17,11 @@ from homeassistant.config_entries import (
     ConfigEntryState,
 )
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
 import homeassistant.helpers.config_validation as cv
-from homeassistant.helpers.dispatcher import dispatcher_send
+from homeassistant.helpers.dispatcher import async_dispatcher_send, dispatcher_send
 from homeassistant.helpers.issue_registry import IssueSeverity, async_create_issue
 from homeassistant.helpers.typing import ConfigType
 
@@ -32,12 +32,15 @@ from .const import (
     DEFAULT_BAUD_RATE,
     DEFAULT_CUL_PATH,
     DOMAIN,
+    EVENT_SOMFY_CUL_REMOTE,
     PLATFORMS,
     SERVICE_RELOAD_PLATFORM,
     SERVICE_SEND_RAW_COMMAND,
     SIGNAL_SOMFY_CUL_FRAME,
+    SIGNAL_SOMFY_CUL_REMOTE,
 )
 from .cul import Cul
+from .rts import RtsFrame, parse_frame
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -70,6 +73,8 @@ class SomfyCulData:
     # total number of received lines; the buffer length stops growing at maxlen
     rx_count: int = 0
     rx_callback: Any = None
+    # received remotes: address -> (monotonic time, last frame)
+    remotes: dict[str, tuple[float, RtsFrame]] = field(default_factory=dict)
 
 
 type SomfyCulConfigEntry = ConfigEntry[SomfyCulData]
@@ -153,7 +158,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: SomfyCulConfigEntry) -> 
 
     data = SomfyCulData(cul=cul)
 
+    @callback
+    def _async_on_remote(frame: RtsFrame) -> None:
+        """Handle a frame of a remote or sensor (in the event loop)."""
+        last = data.remotes.get(frame.address)
+        data.remotes[frame.address] = (time.monotonic(), frame)
+        # a remote repeats the frame while the button is pressed; the
+        # firmware filters these repeats, but not after a short reception gap
+        if (
+            last is not None
+            and last[1].rolling_code == frame.rolling_code
+            and last[1].command_code == frame.command_code
+        ):
+            return
+
+        _LOGGER.debug(
+            "Remote %s: %s (rolling code %d, RSSI %s)",
+            frame.address, frame.command, frame.rolling_code, frame.rssi,
+        )
+        hass.bus.async_fire(
+            EVENT_SOMFY_CUL_REMOTE,
+            {
+                "address": frame.address,
+                "command": frame.command,
+                "command_code": frame.command_code,
+                "rolling_code": frame.rolling_code,
+                "rssi": frame.rssi,
+            },
+        )
+        async_dispatcher_send(hass, SIGNAL_SOMFY_CUL_REMOTE, frame)
+
     def _on_rx(line: str) -> None:
+        """Handle a line from the CUL (in the listener thread)."""
         data.rx_buffer.append(line)
         data.rx_count += 1
 
@@ -163,9 +199,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: SomfyCulConfigEntry) -> 
         # entities could subscribe on this:
         dispatcher_send(hass, SIGNAL_SOMFY_CUL_FRAME, line)
 
+        if (frame := parse_frame(line)) is not None:
+            hass.loop.call_soon_threadsafe(_async_on_remote, frame)
+
     data.rx_callback = _on_rx
     cul.start_listen(_on_rx)
     entry.runtime_data = data
+    await _async_enable_reception(hass, cul)
 
     async def _on_ha_stop(_event) -> None:
         await _async_close(hass, cul, cul_path)
@@ -188,6 +228,15 @@ async def async_unload_entry(hass: HomeAssistant, entry: SomfyCulConfigEntry) ->
 async def _async_update_listener(hass: HomeAssistant, entry: SomfyCulConfigEntry) -> None:
     """Reload the entry when the options changed."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def _async_enable_reception(hass: HomeAssistant, cul: Cul) -> None:
+    """Enable the reception of Somfy RTS frames.
+
+    a-culfw with Somfy RTS reception enables it at power on on 433 MHz and
+    answers "Ye:1". Firmware without reception ignores the command.
+    """
+    await hass.async_add_executor_job(cul.send_line, "Ye1")
 
 
 async def _async_close(hass: HomeAssistant, cul: Cul, cul_path: str) -> None:
@@ -213,6 +262,7 @@ async def _async_reconnect(hass: HomeAssistant, data: SomfyCulData) -> bool:
     reopened = await hass.async_add_executor_job(data.cul.reload_connection)
     if reopened and data.rx_callback:
         await hass.async_add_executor_job(data.cul.start_listen, data.rx_callback)
+        await _async_enable_reception(hass, data.cul)
     return reopened
 
 

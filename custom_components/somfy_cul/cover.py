@@ -21,10 +21,11 @@ from homeassistant.components.cover import (
     CoverState,
 )
 from homeassistant.config_entries import ConfigSubentry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import (
     AddConfigEntryEntitiesCallback,
     AddEntitiesCallback,
@@ -43,6 +44,7 @@ from .const import (
     CONF_DEVICE_CLASS,
     CONF_INVERTED,
     CONF_NAME,
+    CONF_REMOTES,
     CONF_REVERSED,
     CONF_TYPE,
     DOMAIN,
@@ -52,9 +54,11 @@ from .const import (
     SERVICE_PROG,
     SERVICE_RELOAD,
     SERVICE_STOP,
+    SIGNAL_SOMFY_CUL_REMOTE,
     SUBENTRY_TYPE_COVER,
 )
 from .cul import Cul
+from .rts import CMD_DOWN, CMD_MY, CMD_UP, RtsFrame
 
 if TYPE_CHECKING:
     from . import SomfyCulConfigEntry
@@ -148,6 +152,7 @@ PLATFORM_SCHEMA = COVER_PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_INVERTED, default=False): cv.boolean,
         vol.Optional(ATTR_UP_TIME): vol.Coerce(int),
         vol.Optional(ATTR_DOWN_TIME): vol.Coerce(int),
+        vol.Optional(CONF_REMOTES): vol.All(cv.ensure_list, [cv.string]),
     }
 )
 
@@ -176,7 +181,7 @@ def async_get_yaml_covers(config: ConfigType) -> list[dict[str, Any]]:
             CONF_REVERSED: conf[CONF_REVERSED],
             CONF_INVERTED: conf[CONF_INVERTED],
         }
-        for key in (ATTR_UP_TIME, ATTR_DOWN_TIME):
+        for key in (ATTR_UP_TIME, ATTR_DOWN_TIME, CONF_REMOTES):
             if conf.get(key) is not None:
                 cover[key] = conf[key]
         covers.append(cover)
@@ -286,6 +291,10 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         self._inverted = bool(data.get(CONF_INVERTED, False))
         self._up_time = data.get(ATTR_UP_TIME)
         self._down_time = data.get(ATTR_DOWN_TIME)
+        # remotes and sensors controlling the same motor (padded addresses)
+        self._remotes = {
+            str(remote).upper().zfill(6) for remote in data.get(CONF_REMOTES, [])
+        }
 
         self._cancel_drv_timer = None
         self._cancel_stop_timer = None
@@ -471,6 +480,51 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         await self._load_state_from_yaml()
         # save the initial state or migrate the entry to the current format
         await self._save_state_to_yaml()
+
+        if self._remotes:
+            self.async_on_remove(
+                async_dispatcher_connect(
+                    self.hass, SIGNAL_SOMFY_CUL_REMOTE, self._async_remote_frame
+                )
+            )
+
+    @callback
+    def _async_remote_frame(self, frame: RtsFrame) -> None:
+        """Track the state when a linked remote or sensor controls the motor.
+
+        The command is not sent again, the motor has received it from the
+        remote. Reverse direction applies to the remote as well: its Up
+        button moves the motor in the direction the cover sends as Up.
+        """
+        if frame.address not in self._remotes:
+            return
+
+        if frame.command_code == CMD_UP:
+            cmd = self._wire_command(Command.UP)
+        elif frame.command_code == CMD_DOWN:
+            cmd = self._wire_command(Command.DOWN)
+        elif frame.command_code == CMD_MY:
+            if not (self._moving_up or self._moving_down):
+                # a stopped motor moves to its MY position, which is unknown
+                _LOGGER.debug(
+                    "%s: MY from remote %s while stopped, position not changed",
+                    self._name, frame.address,
+                )
+                return
+            cmd = Command.STOP
+        else:
+            _LOGGER.debug(
+                "%s: command %s from remote %s ignored",
+                self._name, frame.command, frame.address,
+            )
+            return
+
+        _LOGGER.debug(
+            "%s: %s from remote %s", self._name, frame.command, frame.address
+        )
+        # the remote overrides a positioning move started here
+        self._cancel_pending_stop()
+        self._update_state(cmd)
 
     async def async_reload_state(self, **kwargs: Any) -> None:
         """Reload the state from the YAML file."""
