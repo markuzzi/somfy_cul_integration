@@ -26,6 +26,13 @@ stop_cover:
     entity:
       integration: somfy_cul
       domain: cover
+move_to_my:
+  name: "Move to MY position"
+  description: "Move the cover to the position stored inside the motor"
+  target:
+    entity:
+      integration: somfy_cul
+      domain: cover
 reload_state:
   name: "Reload State"
   description: "Reload the state YAML file"

@@ -135,6 +135,7 @@ The integration registers several services to directly control or manage your SO
 | `somfy_cul.open_cover` | Open the specified cover. |
 | `somfy_cul.close_cover` | Close the specified cover. |
 | `somfy_cul.stop_cover` | Stop the cover's movement immediately. |
+| `somfy_cul.move_to_my` | Move the cover to the position stored inside the motor. |
 | `somfy_cul.reload_state` | Reload the `somfy_cover_state.yaml` file from disk. Useful if you manually edited encryption keys or rolling codes. |
 | `somfy_cul.reload_platform` | Reconnect to the CUL stick and restart the listener. |
 | `somfy_cul.send_raw_command` | Send a raw command to the CUL and log the response. |

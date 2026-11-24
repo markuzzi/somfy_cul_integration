@@ -37,6 +37,7 @@ from .const import (
     CONF_DEVICE_CLASS,
     CONF_INVERTED,
     CONF_NAME,
+    CONF_MY_POSITION,
     CONF_REMOTES,
     CONF_REVERSED,
     DEFAULT_BAUD_RATE,
@@ -150,6 +151,11 @@ COVER_OPTIONS_SCHEMA = {
             min=1, max=600, step=1, unit_of_measurement="s", mode=selector.NumberSelectorMode.BOX
         )
     ),
+    vol.Optional(CONF_MY_POSITION): selector.NumberSelector(
+        selector.NumberSelectorConfig(
+            min=1, max=99, step=1, unit_of_measurement="%", mode=selector.NumberSelectorMode.BOX
+        )
+    ),
     vol.Required(CONF_REVERSED, default=False): selector.BooleanSelector(),
     vol.Required(CONF_INVERTED, default=False): selector.BooleanSelector(),
 }
@@ -186,7 +192,7 @@ def _clean_cover_data(user_input: dict[str, Any]) -> dict[str, Any]:
         if remote not in remotes:
             remotes.append(remote)
     data[CONF_REMOTES] = remotes
-    for key in (ATTR_UP_TIME, ATTR_DOWN_TIME):
+    for key in (ATTR_UP_TIME, ATTR_DOWN_TIME, CONF_MY_POSITION):
         if data.get(key) is None:
             data.pop(key, None)
         else:
