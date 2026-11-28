@@ -44,6 +44,7 @@ from .const import (
     CONF_DEVICE_CLASS,
     CONF_INVERTED,
     CONF_NAME,
+    CONF_MY_POSITION,
     CONF_REMOTES,
     CONF_REVERSED,
     CONF_TYPE,
@@ -54,6 +55,7 @@ from .const import (
     SERVICE_PROG,
     SERVICE_RELOAD,
     SERVICE_STOP,
+    SERVICE_MY,
     SIGNAL_SOMFY_CUL_REMOTE,
     SUBENTRY_TYPE_COVER,
 )
@@ -148,6 +150,7 @@ PLATFORM_SCHEMA = COVER_PLATFORM_SCHEMA.extend(
         vol.Required(CONF_ADDRESS): cv.string,
         vol.Optional(CONF_TYPE): cv.string,
         vol.Optional(CONF_DEVICE_CLASS): cv.string,
+        vol.Optional(CONF_MY_POSITION): vol.All(vol.Coerce(int), vol.Range(min=1, max=99)),
         vol.Optional(CONF_REVERSED, default=False): cv.boolean,
         vol.Optional(CONF_INVERTED, default=False): cv.boolean,
         vol.Optional(ATTR_UP_TIME): vol.Coerce(int),
@@ -181,7 +184,7 @@ def async_get_yaml_covers(config: ConfigType) -> list[dict[str, Any]]:
             CONF_REVERSED: conf[CONF_REVERSED],
             CONF_INVERTED: conf[CONF_INVERTED],
         }
-        for key in (ATTR_UP_TIME, ATTR_DOWN_TIME, CONF_REMOTES):
+        for key in (ATTR_UP_TIME, ATTR_DOWN_TIME, CONF_REMOTES, CONF_MY_POSITION):
             if conf.get(key) is not None:
                 cover[key] = conf[key]
         covers.append(cover)
@@ -232,6 +235,7 @@ async def async_setup_entry(
     platform.async_register_entity_service(SERVICE_OPEN, {}, "async_open_cover")
     platform.async_register_entity_service(SERVICE_CLOSE, {}, "async_close_cover")
     platform.async_register_entity_service(SERVICE_STOP, {}, "async_stop_cover")
+    platform.async_register_entity_service(SERVICE_MY, {}, "async_move_to_my")
     platform.async_register_entity_service(SERVICE_RELOAD, {}, "async_reload_state")
 
 
@@ -291,6 +295,7 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         self._inverted = bool(data.get(CONF_INVERTED, False))
         self._up_time = data.get(ATTR_UP_TIME)
         self._down_time = data.get(ATTR_DOWN_TIME)
+        self._my_position = data.get(CONF_MY_POSITION)
         # remotes and sensors controlling the same motor (padded addresses)
         self._remotes = {
             str(remote).upper().zfill(6) for remote in data.get(CONF_REMOTES, [])
@@ -388,6 +393,22 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         """Stop the cover."""
         await self.async_send_command(Command.STOP)
 
+    async def async_move_to_my(self, **kwargs: Any) -> None:
+        """Move to the motor's stored MY preset"""
+        if self._my_position is None:
+            _LOGGER.error("MY-Position not configured for %s", self._name)
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="my_position_not_configured",
+                translation_placeholders={"cover": self._name},
+            )
+
+        # STOP and MY use the same RTS frame. Stop first and then send MY.
+        if self._attr_is_opening or self._attr_is_closing:
+            await self.async_stop_cover()
+
+        await self.async_send_command(Command.MY, self._my_position)
+
     async def async_set_cover_position(self, **kwargs: Any) -> None:
         """Move the cover to a specific position."""
         if (position := kwargs.get(ATTR_POSITION)) is None:
@@ -406,6 +427,9 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
         if position <= 0:
             _LOGGER.debug("Position %s -> close_cover (no timed STOP) for %s", position, self._name)
             await self.async_close_cover()
+            return
+        if self._my_position is not None and position == self._my_position:
+            await self.async_move_to_my()
             return
 
         # the target is given in Home Assistant terms, the motor needs its own
@@ -750,6 +774,22 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
 
             _LOGGER.debug("POS timer with timeout: %s", time_to_stop)
 
+        elif cmd == Command.MY:
+            direction, duration = self._calculate_position_command(target_position)
+            if cmd is None or duration is None:
+                _LOGGER.debug("Position cannot be set")
+                return None, None
+
+            self._moving_up = direction == Command.UP
+            self._moving_down = direction == Command.DOWN
+            self.async_write_ha_state()
+
+            async def _handle_timer(_now):
+                self._write_state_pos(target_position)
+            self._cancel_drv_timer = async_call_later(self.hass, duration, _handle_timer)
+
+            _LOGGER.debug("MY timer with timeout: %s", duration)
+
         elif cmd == Command.UP:
             self._moving_up = True
             self._moving_down = False
@@ -804,14 +844,14 @@ class SomfyCulShade(RestoreEntity, CoverEntity):
             _move_time = self._up_time
         elif cmd == Command.DOWN:
             _move_time = self._down_time
-        elif cmd == Command.POS:
+        elif cmd == Command.POS or cmd == Command.MY:
             _move_time = min(self._up_time or 0, self._down_time or 0)
 
         _LOGGER.debug("Move time: %s", _move_time)
 
         time_to_stop = None
 
-        if cmd in (Command.UP, Command.DOWN, Command.POS):
+        if cmd in (Command.UP, Command.DOWN, Command.POS, Command.MY):
             if _move_time and _move_time > 0:
                 cmd, time_to_stop = self._start_update_state_timer(cmd, target_position)
             else:

@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+- Add an option to use the `MY` command, which moves the cover to a position stored inside the motor
+  - To keep the status with HA synchronized, the position must be configured before using
+
 ## 1.3.0
 
 - Reception of Somfy RTS remotes and sensors, with an a-culfw firmware supporting it (a-culfw 1.26.09, command `Ye`):
